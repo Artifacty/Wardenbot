@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from main.Wardenbot.wardenbot.wardenbot.opsplan import OpTimes, plan_actions
+from wardenbot.opsplan import OpTimes, plan_actions
 
 START = datetime(2026, 11, 8, 17, 0, tzinfo=UTC)
 

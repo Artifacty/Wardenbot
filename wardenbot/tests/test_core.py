@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from wardenbot import ranks, repo
-from main.Wardenbot.wardenbot.wardenbot.config import ConfigError, load_config
-from main.Wardenbot.wardenbot.wardenbot.db import connect
-from main.Wardenbot.wardenbot.wardenbot.slots import (
+from wardenbot.config import ConfigError, load_config
+from wardenbot.db import connect
+from wardenbot.slots import (
     SlotSpec,
     SupplySpec,
     parse_slots,
@@ -14,8 +14,8 @@ from main.Wardenbot.wardenbot.wardenbot.slots import (
     parse_supply_progress,
     progress_bar,
 )
-from main.Wardenbot.wardenbot.wardenbot.steam import parse_steam
-from main.Wardenbot.wardenbot.wardenbot.timeutil import (
+from wardenbot.steam import parse_steam
+from wardenbot.timeutil import (
     ParseError,
     parse_duration_hours,
     parse_local_datetime,
@@ -286,7 +286,7 @@ def test_backup_tool_makes_a_readable_copy_and_prunes(tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
     import backup as backup_tool
 
-    from main.Wardenbot.wardenbot.wardenbot.db import Database
+    from wardenbot.db import Database
 
     db_file = tmp_path / "d" / "bot.db"
     db = Database(str(db_file))
