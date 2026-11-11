@@ -8,10 +8,11 @@ import re
 import discord
 from discord.ext import commands
 
+from .. import repo
 from ..bot import WardenBot
-from ..i18n import lang_of, t
+from ..i18n import user_language, t
 from ..layout import ROLE_BY_KEY
-from ..services import get_role, report_error, reply
+from ..services import get_role, report_error, reply, utcnow
 
 log = logging.getLogger(__name__)
 SELF_ROLES = ("lang_ru", "lang_en", "ping_ops", "ping_logi")
@@ -35,10 +36,19 @@ class RoleButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:role:(
 
     async def callback(self, interaction: discord.Interaction) -> None:
         bot: WardenBot = interaction.client  # type: ignore[assignment]
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         member = interaction.user
         if interaction.guild is None or not isinstance(member, discord.Member):
             await reply(interaction, t("err_guild_only", lang))
+            return
+        user = await bot.db.read(repo.user_get, member.id)
+        if user is None or user['status'] != 'admitted':
+            await reply(interaction, "Complete verification first.")
+            return
+        if self.key in ('lang_ru', 'lang_en'):
+            language = 'ru' if self.key == 'lang_ru' else 'en'
+            await bot.db.write(repo.user_update, member.id, utcnow(), language=language)
+            await reply(interaction, "Язык: русский." if language == 'ru' else "Language: English.")
             return
         role = get_role(bot, interaction.guild, self.key)
         if role is None:

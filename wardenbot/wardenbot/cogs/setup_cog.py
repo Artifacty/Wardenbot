@@ -9,10 +9,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from .. import repo
 from ..bot import WardenBot
-from ..i18n import lang_of, t
+from ..i18n import user_language, t
 from ..invite import role_permissions
-from ..layout import CATEGORIES, ROLES, CategoryDef, ChannelDef, role_display_name
+from ..layout import CATEGORIES, ROLES, LEGACY_ROLE_KEYS, CategoryDef, ChannelDef, role_display_name
 from ..invite import required_permission_names
 from ..perm_layout import category_overwrites, channel_overwrites
 from ..perms import is_admin
@@ -50,26 +51,35 @@ class SetupCog(commands.Cog):
             if role is None:
                 name = role_display_name(rd)
                 role = discord.utils.get(guild.roles, name=name)
+            if role is None:
+                legacy_en = {'command': 'Command', 'staff': 'Staff', 'regiment_co': 'Regiment CO',
+                             'sergeant': 'Sergeant', 'private': 'Private', 'recruit': 'Recruit'}.get(rd.key, rd.en)
+                legacy_name = f"{rd.symbol} {rd.ru} · {legacy_en}".strip()
+                role = discord.utils.get(guild.roles, name=legacy_name)
+            if role is None and rd.key in LEGACY_ROLE_KEYS:
+                continue
             perms = role_permissions(rd)
             if role is None:
                 role = await guild.create_role(
                     name=role_display_name(rd), colour=discord.Colour(rd.color), hoist=rd.hoist,
                     mentionable=rd.mentionable, permissions=perms, reason="Warden setup",
                 )
-                log_lines.append(f"role + {role.name}")
+                log_lines.append(f"Создана роль: {role.name}")
+            elif role.name != role_display_name(rd):
+                role = await role.edit(name=role_display_name(rd), reason="Имена ролей на английском")
             await self.bot.set_cfg(guild.id, f"role.{rd.key}", role.id)
             result[rd.key] = role
         # Order: our roles go just under the bot's own role, highest first. This only works when
         # the bot role is placed high enough (at least one place per role below it).
         top = guild.me.top_role.position
-        if top - len(ROLES) < 1:
-            log_lines.append("role order NOT set: drag the bot role higher in Server Settings > Roles, then run /setup run again")
+        if top - len(result) < 1:
+            log_lines.append("Поднимите роль бота выше остальных ролей и повторите /setup run")
         else:
             try:
-                positions = {result[rd.key]: top - 1 - index for index, rd in enumerate(ROLES)}
+                positions = {result[rd.key]: top - 1 - index for index, rd in enumerate(rd for rd in ROLES if rd.key in result)}
                 await guild.edit_role_positions(positions, reason="Warden setup: order roles")
             except (discord.Forbidden, discord.HTTPException):
-                log_lines.append("role order not changed (move the bot role to the top by hand)")
+                log_lines.append("Порядок ролей не изменён: поднимите роль бота вручную")
         return result
 
     # ------------------------------------------------------------ channels --
@@ -96,10 +106,12 @@ class SetupCog(commands.Cog):
             existing = guild.get_channel(int(stored))
         overwrites = self._target_overwrites(category_overwrites(cat), roles, guild)
         if isinstance(existing, discord.CategoryChannel):
+            if cat.key in ("entry", "command"):
+                await existing.edit(name=cat.name, overwrites=overwrites, reason="Язык и доступ категории")
             return existing
         created = await guild.create_category(name=cat.name, overwrites=overwrites, reason="Warden setup")
         await self.bot.set_cfg(guild.id, f"cat.{cat.key}", created.id)
-        log_lines.append(f"category + {created.name}")
+        log_lines.append(f"Создана категория: {created.name}")
         return created
 
     async def _ensure_channel(
@@ -114,12 +126,21 @@ class SetupCog(commands.Cog):
             existing = guild.get_channel(int(stored))
         overwrites = self._target_overwrites(channel_overwrites(ch), roles, guild)
         if existing is not None:
-            if fix:
+            # Trading channels and their configured permissions are explicitly preserved.
+            if ch.key in ("sell", "buy", "services"):
+                return existing
+            policy_channel = ch.access in ("public", "staff", "screening", "command") or ch.key == "news"
+            if policy_channel:
+                changes = dict(name=name, overwrites=overwrites, reason="Язык и доступ канала")
+                if ch.kind != "voice":
+                    changes['topic'] = ch.topic
+                await existing.edit(**changes)
+            elif fix:
                 try:
                     await existing.edit(overwrites=overwrites, reason="Warden setup: fix permissions")
-                    log_lines.append(f"permissions fixed {existing.name}")
+                    log_lines.append(f"Права восстановлены: {existing.name}")
                 except discord.HTTPException:
-                    log_lines.append(f"could not fix permissions for {existing.name}")
+                    log_lines.append(f"Не удалось восстановить права: {existing.name}")
             return existing
         if ch.kind == "text":
             created = await guild.create_text_channel(
@@ -138,7 +159,7 @@ class SetupCog(commands.Cog):
         else:  # pragma: no cover
             raise ValueError(ch.kind)
         await self.bot.set_cfg(guild.id, f"ch.{ch.key}", created.id)
-        log_lines.append(f"channel + {created.name}")
+        log_lines.append(f"Создан канал: {created.name}")
         return created
 
     # ------------------------------------------------------------- automod --
@@ -165,10 +186,10 @@ class SetupCog(commands.Cog):
                 exempt_channels=exempt_channels,
                 reason="Warden setup",
             )
-            log_lines.append("automod + stockpile codes (exempt: staff channels)")
+            log_lines.append("Создан AutoMod для кодов складов")
         except (discord.Forbidden, discord.HTTPException) as exc:
             log.warning("AutoMod rule not created: %s", exc)
-            log_lines.append("automod NOT created (create the rule by hand, see README)")
+            log_lines.append("AutoMod не создан: настройте правило вручную по README")
 
     # ---------------------------------------------------------- guild settings
     async def _guild_settings(self, guild: discord.Guild, log_lines: list[str]) -> None:
@@ -179,9 +200,9 @@ class SetupCog(commands.Cog):
                 default_notifications=discord.NotificationLevel.only_mentions,
                 reason="Warden setup",
             )
-            log_lines.append("guild settings: verification medium, content filter all members")
+            log_lines.append("Настройки сервера: средняя проверка, фильтр для всех участников")
         except (discord.Forbidden, discord.HTTPException):
-            log_lines.append("guild settings not changed")
+            log_lines.append("Настройки сервера не изменены")
         rules = get_text_channel(self.bot, guild, "rules")
         news = get_text_channel(self.bot, guild, "news")
         if guild.features and "COMMUNITY" in guild.features and isinstance(rules, discord.TextChannel) and isinstance(news, discord.TextChannel):
@@ -208,7 +229,6 @@ class SetupCog(commands.Cog):
         return msg
 
     async def post_panels(self, guild: discord.Guild) -> list[str]:
-        from .selfroles import build_roles_view
         from .verification import build_verify_view
 
         notes: list[str] = []
@@ -216,34 +236,31 @@ class SetupCog(commands.Cog):
         start = get_text_channel(self.bot, guild, "start")
         verify = get_text_channel(self.bot, guild, "verify")
         if isinstance(rules, discord.TextChannel):
-            ru = [discord.Embed(description=read_text(f"rules_ru_{i}.md"), color=BLUE) for i in (1, 2)]
             en = [discord.Embed(description=read_text(f"rules_en_{i}.md"), color=BLUE) for i in (1, 2)]
-            ru[0].title, en[0].title = "Правила", "Rules"
-            await self._upsert(guild, "rules_ru", rules, embeds=ru)
+            en[0].title = "Rules"
             await self._upsert(guild, "rules_en", rules, embeds=en)
+            # Reuse the old Russian panel ID instead of deleting a message or
+            # leaving pre-verification instructions in the wrong language.
+            if self.bot.cfg(guild.id).get("msg.rules_ru"):
+                await self._upsert(guild, "rules_ru", rules, embeds=[discord.Embed(
+                    title="Verification", description="Read the rules above, then use Verify to apply.", color=BLUE)])
             notes.append("rules")
         if isinstance(start, discord.TextChannel):
             embed = discord.Embed(
-                title="Добро пожаловать · Welcome",
-                description=(
-                    "Этот сервер для игроков Варденов в Foxhole: доска операций, объявления, наборы в полки.\n"
-                    "Выберите язык и пинги кнопками ниже, затем пройдите допуск в канале допуска.\n\n"
-                    "This server is for Warden players in Foxhole: an operations board, listings and regiment recruitment.\n"
-                    "Choose your language and pings with the buttons below, then pass verification in the verification channel."
-                ),
+                title="Welcome",
+                description="A community for Warden players. Read the rules, then use Verify to apply. "
+                            "Choose Russian or English in the verification form.",
                 color=BLUE,
             )
-            await self._upsert(guild, "start", start, embeds=[embed], view=build_roles_view())
+            await self._upsert(guild, "start", start, embeds=[embed], view=build_verify_view())
             notes.append("start")
         if isinstance(verify, discord.TextChannel):
             embed = discord.Embed(
-                title="Допуск · Verification",
-                description=(
-                    "Допуск нужен, чтобы закрытые каналы оставались закрытыми. Вам понадобятся ссылка на профиль Steam "
-                    "и скриншот Foxhole с выбранной фракцией Варденов. Нажмите кнопку.\n\n"
-                    "Verification keeps the closed channels closed. You will need your Steam profile link and a Foxhole "
-                    "screenshot showing the Wardens faction. Press the button."
-                ),
+                title="Verification",
+                description="Enter your in-game name, optional clan and preferred language. "
+                            "Type your one-time code in the in-game chat. Upload ONE screenshot "
+                            "showing both F1 and the chat with your code using /verify screenshot. "
+                            "A moderator will review your request.",
                 color=BLUE,
             )
             await self._upsert(guild, "verify", verify, embeds=[embed], view=build_verify_view())
@@ -261,7 +278,7 @@ class SetupCog(commands.Cog):
         self, interaction: discord.Interaction, include_later: bool = False,
         guild_settings: bool = True, fix_permissions: bool = False,
     ) -> None:
-        lang = lang_of(interaction)
+        lang = "ru"
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
             await reply(interaction, t("err_no_perm", lang))
@@ -287,18 +304,27 @@ class SetupCog(commands.Cog):
             await self._ensure_automod(guild, lines)
             if guild_settings:
                 await self._guild_settings(guild, lines)
+            def queue_roles(conn):
+                for member in guild.members:
+                    if member.bot:
+                        continue
+                    user = repo.user_get(conn, member.id)
+                    target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
+                        'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
+                    repo.role_job_set(conn, guild.id, member.id, target)
+            await self.bot.db.write(queue_roles)
             notes = await self.post_panels(guild)
-            lines.append("panels: " + ", ".join(notes))
+            lines.append("Панели: " + ", ".join(notes))
         except discord.Forbidden as exc:
             await interaction.followup.send(f"Forbidden: {exc}. {t('setup_missing_perms', lang, perms='?')}", ephemeral=True)
             return
-        await audit(self.bot, guild, interaction.user, "Setup", details="; ".join(lines)[:900])
+        await audit(self.bot, guild, interaction.user, "Настройка сервера", details="; ".join(lines)[:900])
         body = "\n".join(f"• {line}" for line in lines[:40]) or "—"
         await interaction.followup.send(f"{t('setup_done', lang)}\n{body}"[:1900], ephemeral=True)
 
     @setup.command(name="panels", description="Re-post rules, start and verification messages · Обновить сообщения")
     async def setup_panels(self, interaction: discord.Interaction) -> None:
-        lang = lang_of(interaction)
+        lang = "ru"
         if interaction.guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
@@ -308,7 +334,7 @@ class SetupCog(commands.Cog):
 
     @setup.command(name="status", description="Show what is configured · Показать состояние")
     async def setup_status(self, interaction: discord.Interaction) -> None:
-        lang = lang_of(interaction)
+        lang = "ru"
         guild = interaction.guild
         if guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
             await reply(interaction, t("err_no_perm", lang))
@@ -317,6 +343,8 @@ class SetupCog(commands.Cog):
         lines = []
         for rd in ROLES:
             rid = cfg.get(f"role.{rd.key}")
+            if not rid and rd.key in LEGACY_ROLE_KEYS:
+                continue
             ok = bool(rid and rid.isdigit() and guild.get_role(int(rid)))
             lines.append(f"{'✓' if ok else '✗'} role {rd.key}")
         for cat in CATEGORIES:

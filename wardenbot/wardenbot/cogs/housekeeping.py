@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 
 from .. import repo
 from ..bot import WardenBot
-from ..services import audit, evaluate_member
+from ..services import audit, evaluate_member, sync_member_roles
 
 log = logging.getLogger(__name__)
 
@@ -20,9 +20,11 @@ class HousekeepingCog(commands.Cog):
 
     async def cog_load(self) -> None:
         self.promotions.start()
+        self.role_sync.start()
 
     async def cog_unload(self) -> None:
         self.promotions.cancel()
+        self.role_sync.cancel()
 
     @tasks.loop(hours=1)
     async def promotions(self) -> None:
@@ -41,18 +43,40 @@ class HousekeepingCog(commands.Cog):
     async def _before(self) -> None:
         await self.bot.wait_until_ready()
 
+    @tasks.loop(seconds=30)
+    async def role_sync(self) -> None:
+        for job in await self.bot.db.read(repo.role_jobs_pending):
+            guild = self.bot.get_guild(job['guild_id'])
+            if guild is None:
+                continue
+            try:
+                await sync_member_roles(self.bot, guild, job['user_id'])
+            except Exception:
+                log.exception("Role synchronization failed for %s", job['user_id'])
+
+    @role_sync.before_loop
+    async def _before_roles(self) -> None:
+        await self.bot.wait_until_ready()
+
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot:
             return
+        def queue(conn):
+            user = repo.user_get(conn, member.id)
+            target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
+                'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
+            repo.role_job_set(conn, member.guild.id, member.id, target)
+        await self.bot.db.write(queue)
+        await sync_member_roles(self.bot, member.guild, member.id)
         age = (discord.utils.utcnow() - member.created_at).days
-        await audit(self.bot, member.guild, None, "Join", member.mention, f"account age: {age} d")
+        await audit(self.bot, member.guild, None, "Вход на сервер", member.mention, f"Возраст аккаунта: {age} д.")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
         if member.bot:
             return
-        await audit(self.bot, member.guild, None, "Leave", f"{member} ({member.id})")
+        await audit(self.bot, member.guild, None, "Выход с сервера", f"{member} ({member.id})")
 
 
 async def setup(bot: WardenBot) -> None:

@@ -10,10 +10,10 @@ from discord.ext import commands
 
 from .. import repo
 from ..bot import WardenBot
-from ..i18n import lang_of, parse_error_text, t
+from ..i18n import user_language, parse_error_text, t
 from ..layout import ROLE_BY_KEY
 from ..perms import can_screen, can_staff, can_vouch, is_admitted
-from ..services import audit, evaluate_member, reply, safe_dm, set_rank_roles, utcnow
+from ..services import audit, evaluate_member, reply, safe_dm, set_rank_roles, sync_member_roles, utcnow
 from ..timeutil import ParseError, resolve_tz, to_iso
 
 log = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class MembersCog(commands.Cog):
     @member.command(name="admit", description="Admit a player without the screenshot flow · Допустить вручную")
     @app_commands.choices(rank=RANK_CHOICES)
     async def admit(self, interaction: discord.Interaction, player: discord.Member, rank: app_commands.Choice[str] | None = None) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         if not isinstance(interaction.user, discord.Member) or not can_screen(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
@@ -41,32 +41,36 @@ class MembersCog(commands.Cog):
             repo.user_update(
                 conn, player.id, now, status="admitted", rank=key, admitted_at=to_iso(now), admitted_by=interaction.user.id,
             )
+            repo.role_job_set(conn, interaction.guild.id, player.id, key)
 
         await self.bot.db.write(work)
         await interaction.response.defer(ephemeral=True)
-        await set_rank_roles(self.bot, player, key, reason=f"Manual admission by {interaction.user}")
-        await audit(self.bot, interaction.guild, interaction.user, "Manual admission", player.mention, key)  # type: ignore[arg-type]
+        await sync_member_roles(self.bot, interaction.guild, player.id)
+        await audit(self.bot, interaction.guild, interaction.user, "Ручной допуск", player.mention, key)  # type: ignore[arg-type]
         await interaction.followup.send(t("mem_admitted", lang, user=player.mention, rank=ROLE_BY_KEY[key].name),
                                         ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @member.command(name="rank", description="Set the rank · Установить звание")
     @app_commands.choices(rank=RANK_CHOICES)
     async def rank(self, interaction: discord.Interaction, player: discord.Member, rank: app_commands.Choice[str]) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         if not isinstance(interaction.user, discord.Member) or not can_staff(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
         now = utcnow()
-        await self.bot.db.write(lambda conn: repo.user_update(conn, player.id, now, rank=rank.value))
+        def work(conn):
+            repo.user_update(conn, player.id, now, rank=rank.value)
+            repo.role_job_set(conn, interaction.guild.id, player.id, rank.value)
+        await self.bot.db.write(work)
         await interaction.response.defer(ephemeral=True)
-        await set_rank_roles(self.bot, player, rank.value, reason=f"Rank set by {interaction.user}")
-        await audit(self.bot, interaction.guild, interaction.user, "Rank set", player.mention, rank.value)  # type: ignore[arg-type]
+        await sync_member_roles(self.bot, interaction.guild, player.id)
+        await audit(self.bot, interaction.guild, interaction.user, "Назначение роли", player.mention, rank.value)  # type: ignore[arg-type]
         await interaction.followup.send(t("mem_rank_set", lang, user=player.mention, rank=ROLE_BY_KEY[rank.value].name),
                                         ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @member.command(name="info", description="Show a player's record · Данные игрока")
     async def info(self, interaction: discord.Interaction, player: discord.Member) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         if not isinstance(interaction.user, discord.Member) or not can_screen(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
@@ -87,7 +91,7 @@ class MembersCog(commands.Cog):
 
     @member.command(name="vouch", description="Vouch for a player · Поручиться за игрока")
     async def vouch(self, interaction: discord.Interaction, player: discord.Member) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         voucher = interaction.user
         if not isinstance(voucher, discord.Member) or not can_vouch(self.bot, voucher):
             await reply(interaction, t("err_no_perm", lang))
@@ -102,7 +106,7 @@ class MembersCog(commands.Cog):
         if not added:
             await reply(interaction, t("mem_vouch_dup", lang))
             return
-        await audit(self.bot, interaction.guild, voucher, "Vouch", player.mention)  # type: ignore[arg-type]
+        await audit(self.bot, interaction.guild, voucher, "Поручительство", player.mention)  # type: ignore[arg-type]
         await reply(interaction, t("mem_vouched", lang, user=player.mention), allowed_mentions=discord.AllowedMentions.none())
         await evaluate_member(self.bot, interaction.guild, player.id)  # type: ignore[arg-type]
 
@@ -110,7 +114,7 @@ class MembersCog(commands.Cog):
     @timezone.command(name="set", description="Set your time zone · Задать часовой пояс")
     @app_commands.describe(zone="Europe/Moscow, МСК, UTC+3 …")
     async def tz_set(self, interaction: discord.Interaction, zone: str) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         try:
             _, name = resolve_tz(zone)
         except ParseError as exc:
@@ -122,14 +126,14 @@ class MembersCog(commands.Cog):
 
     @timezone.command(name="show", description="Show your time zone · Показать часовой пояс")
     async def tz_show(self, interaction: discord.Interaction) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         user = await self.bot.db.read(repo.user_get, interaction.user.id)
         name = (user["tz"] if user is not None and user["tz"] else None) or self.bot.config.default_tz
         await reply(interaction, t("tz_show", lang, tz=name))
 
     @app_commands.command(name="help", description="Commands and tips · Команды и подсказки")
     async def help(self, interaction: discord.Interaction) -> None:
-        await reply(interaction, t("help_text", lang_of(interaction)))
+        await reply(interaction, t("help_text", await user_language(interaction)))
 
 
 async def setup(bot: WardenBot) -> None:

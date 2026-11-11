@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -10,7 +11,7 @@ import discord
 
 from . import repo
 from . import ranks
-from .i18n import lang_of, t
+from .i18n import user_language, t
 from .layout import RANK_ROLES, ROLE_BY_KEY
 from .timeutil import from_iso
 
@@ -83,7 +84,9 @@ async def set_rank_roles(bot: "WardenBot", member: discord.Member, rank: str, re
     """Give the member exactly one rank role."""
     guild = member.guild
     target = get_role(bot, guild, rank)
-    others = [r for key in RANK_ROLES if key != rank and (r := get_role(bot, guild, key)) is not None and r in member.roles]
+    if target is None:
+        raise RuntimeError("Required role is not configured")
+    others = [r for key in (*RANK_ROLES, "unverified", "rejected") if key != rank and (r := get_role(bot, guild, key)) is not None and r in member.roles]
     if others:
         await member.remove_roles(*others, reason=reason)
     if target is not None and target not in member.roles:
@@ -107,6 +110,7 @@ async def evaluate_member(bot: "WardenBot", guild: discord.Guild, user_id: int, 
         if new_rank == user["rank"]:
             return None
         repo.user_update(conn, user_id, now, rank=new_rank)
+        repo.role_job_set(conn, guild.id, user_id, new_rank)
         return new_rank
 
     new_rank = await bot.db.write(work)
@@ -115,13 +119,11 @@ async def evaluate_member(bot: "WardenBot", guild: discord.Guild, user_id: int, 
     member = guild.get_member(user_id)
     if member is None:
         return new_rank
-    try:
-        await set_rank_roles(bot, member, new_rank, reason="Automatic promotion")
-    except discord.HTTPException:
-        log.warning("Could not update rank roles for %s", user_id, exc_info=True)
+    await sync_member_roles(bot, guild, user_id)
     label = ROLE_BY_KEY[new_rank]
-    await audit(bot, guild, None, "Promotion", f"<@{user_id}>", label.name)
-    await safe_dm(member, f"{t('mem_promoted', 'ru', rank=label.ru)}\n{t('mem_promoted', 'en', rank=label.en)}")
+    await audit(bot, guild, None, "Повышение роли", f"<@{user_id}>", label.name)
+    user = await bot.db.read(repo.user_get, user_id)
+    await safe_dm(member, t("mem_promoted", user["language"], rank=label.en))
     return new_rank
 
 
@@ -136,10 +138,10 @@ async def reply(interaction: discord.Interaction, content: str | None = None, **
 
 async def report_error(bot: "WardenBot", interaction: discord.Interaction | None, error: BaseException, where: str) -> None:
     """Log an unexpected error, tell the user briefly and notify the bot-admin channel."""
-    log.error("Unhandled error in %s", where, exc_info=error)
+    log.error("Unhandled error in %s (%s)", where, type(error).__name__)
     if interaction is not None:
         try:
-            await reply(interaction, t("err_generic", lang_of(interaction)))
+            await reply(interaction, t("err_generic", await user_language(interaction)))
         except discord.HTTPException:
             pass
         guild = interaction.guild
@@ -147,6 +149,26 @@ async def report_error(bot: "WardenBot", interaction: discord.Interaction | None
             channel = get_text_channel(bot, guild, "bot_admin")
             if isinstance(channel, discord.TextChannel):
                 try:
-                    await channel.send(f"Error in `{where}`: `{type(error).__name__}: {str(error)[:300]}`")
+                    await channel.send(f"Ошибка в `{where}`: `{type(error).__name__}`. Проверьте состояние бота.")
                 except discord.HTTPException:
                     pass
+
+
+async def sync_member_roles(bot: "WardenBot", guild, user_id: int) -> bool:
+    """Retry idempotent role updates, retaining failed/newer jobs for the next pass."""
+    lock = bot.role_sync_locks.setdefault((guild.id, user_id), asyncio.Lock())
+    async with lock:
+        job = await bot.db.read(repo.role_job_get, guild.id, user_id)
+        if job is None or job['applied_revision'] == job['revision']:
+            return True
+        try:
+            # Do not rely on a cached role list after a partially completed request.
+            member = await guild.fetch_member(user_id)
+            await set_rank_roles(bot, member, job['target'], reason="Синхронизация доступа")
+        except (discord.HTTPException, RuntimeError) as exc:
+            await bot.db.write(repo.role_job_error, guild.id, user_id, job['revision'], type(exc).__name__)
+            log.warning("Role synchronization pending for guild %s user %s (%s)",
+                        guild.id, user_id, type(exc).__name__)
+            return False
+        await bot.db.write(repo.role_job_ack, guild.id, user_id, job['revision'])
+        return True

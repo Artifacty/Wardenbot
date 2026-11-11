@@ -132,6 +132,12 @@ def test_modals_respect_discord_limits(lang):
         assert len(modal.title) <= 45, modal.title
         assert 1 <= len(modal.children) <= 5
         for field in modal.children:
+            if isinstance(field, discord.ui.Label):
+                assert len(field.text) <= 45
+                field = field.component
+                if isinstance(field, discord.ui.Select):
+                    assert len(field.options) <= 25
+                    continue
             assert len(field.label) <= 45, field.label
             if field.default:
                 assert len(field.default) <= field.max_length, field.label
@@ -199,8 +205,9 @@ def fake_member(user_id, role_ids=(), cls=discord.Member):
     return m
 
 
-def fake_interaction(user, guild_id=1):
+def fake_interaction(user, guild_id=1, bot=None):
     inter = MagicMock()
+    inter.client = bot
     inter.user = user
     inter.locale = "en-US"
     inter.guild = SimpleNamespace(id=guild_id)
@@ -215,6 +222,8 @@ def fake_interaction(user, guild_id=1):
 def test_signup_flow_end_to_end_with_capacity():
     async def go():
         bot = make_bot()
+        def make_interaction(user):
+            return fake_interaction(user, bot=bot)
         await bot.load_extension("wardenbot.cogs.operations")
         cog = bot.get_cog("OperationsCog")
         cog.tick.cancel()
@@ -228,43 +237,43 @@ def test_signup_flow_end_to_end_with_capacity():
             )
         )
         # an unverified user is turned away
-        stranger = fake_interaction(fake_member(10))
+        stranger = make_interaction(fake_member(10))
         await cog.on_signup(stranger, op_id)
         assert "verification" in stranger.response.send_message.call_args.args[0].lower() or "Pass verification" in stranger.response.send_message.call_args.args[0]
 
         # a recruit gets the slot picker
-        u1 = fake_interaction(fake_member(11, [500]))
+        u1 = make_interaction(fake_member(11, [500]))
         await cog.on_signup(u1, op_id)
         view = u1.response.send_message.call_args.kwargs["view"]
         assert type(view).__name__ == "SlotSelectView"  # load_extension re-imports the module
         slots = await bot.db.read(repo.op_slots, op_id)
         view.select._values = [str(slots[0]["id"])]  # type: ignore[attr-defined]
-        pick = fake_interaction(fake_member(11, [500]))
+        pick = make_interaction(fake_member(11, [500]))
         await view.chosen(pick)
         assert "signed up" in pick.response.edit_message.call_args.kwargs["content"]
 
         # the 1-seat slot is now full for the next user
-        u2 = fake_interaction(fake_member(12, [500]))
+        u2 = make_interaction(fake_member(12, [500]))
         await cog.on_signup(u2, op_id)
         view2 = u2.response.send_message.call_args.kwargs["view"]
         view2.select._values = [str(slots[0]["id"])]  # type: ignore[attr-defined]
-        pick2 = fake_interaction(fake_member(12, [500]))
+        pick2 = make_interaction(fake_member(12, [500]))
         await view2.chosen(pick2)
         assert "full" in pick2.response.edit_message.call_args.kwargs["content"]
 
         # the closed briefing: not for strangers, not before T-60, yes for the organizer
-        b1 = fake_interaction(fake_member(11, [500]))
+        b1 = make_interaction(fake_member(11, [500]))
         await cog.on_brief(b1, op_id)
         assert "opens" in b1.response.send_message.call_args.args[0]
-        b2 = fake_interaction(fake_member(12, [500]))
+        b2 = make_interaction(fake_member(12, [500]))
         await cog.on_brief(b2, op_id)
         assert "only for signed-up" in b2.response.send_message.call_args.args[0]
-        b3 = fake_interaction(fake_member(99, [500]))
+        b3 = make_interaction(fake_member(99, [500]))
         await cog.on_brief(b3, op_id)
         assert b3.response.send_message.call_args.kwargs["embed"].description == "secret plan"
 
         # leaving
-        lv = fake_interaction(fake_member(11, [500]))
+        lv = make_interaction(fake_member(11, [500]))
         await cog.on_leave(lv, op_id)
         assert "cancelled" in lv.response.send_message.call_args.args[0]
         for task in cog._pending.values():
@@ -312,7 +321,7 @@ def test_review_card_flags_and_embed():
     flags = "dup_steam:111,222;young_account"
     lines = verification.flag_lines(flags)
     assert any("<@111>" in line and "<@222>" in line for line in lines)
-    assert any("Young" in line for line in lines)
+    assert any("Новый аккаунт" in line for line in lines)
     req = {"id": 3, "user_id": 5, "ingame_name": "X", "regiment": "", "steam_url": "https://steamcommunity.com/id/x",
            "voucher_text": "", "code": "WH-ABCD", "flags": flags}
     embed = verification.build_review_embed(req, None)

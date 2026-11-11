@@ -150,6 +150,20 @@ MIGRATIONS: list[str] = [
         details  TEXT
     );
     """,
+    # v2: language preferences and durable desired Discord roles.
+    """
+    ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('ru','en'));
+    ALTER TABLE verification_requests ADD COLUMN language TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('ru','en'));
+    CREATE TABLE role_jobs (
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        target TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        applied_revision INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        PRIMARY KEY(guild_id, user_id)
+    );
+    """,
 ]
 
 

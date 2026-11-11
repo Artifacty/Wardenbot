@@ -13,9 +13,9 @@ from discord.ext import commands
 from .. import repo
 from ..bot import WardenBot
 from ..codeword import generate_code
-from ..i18n import lang_of, parse_error_text, t
+from ..i18n import user_language, parse_error_text, t
 from ..perms import can_screen
-from ..services import BLUE, audit, channel_mention, get_text_channel, reply, safe_dm, set_rank_roles, utcnow
+from ..services import BLUE, audit, channel_mention, get_text_channel, reply, safe_dm, sync_member_roles, utcnow
 from ..steam import parse_steam
 from ..timeutil import ParseError, from_iso, to_iso
 
@@ -49,14 +49,14 @@ class VerifyPanelView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Пройти допуск · Verify", style=discord.ButtonStyle.primary, custom_id="wb:verify:start")
+    @discord.ui.button(label="Verify", style=discord.ButtonStyle.primary, custom_id="wb:verify:start")
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await begin_verification(interaction)
 
 
 async def begin_verification(interaction: discord.Interaction) -> None:
     bot: WardenBot = interaction.client  # type: ignore[assignment]
-    lang = lang_of(interaction)
+    lang = "en"
     member = interaction.user
     if interaction.guild is None or not isinstance(member, discord.Member):
         await reply(interaction, t("err_guild_only", lang))
@@ -76,14 +76,21 @@ async def begin_verification(interaction: discord.Interaction) -> None:
 
 class VerifyModal(discord.ui.Modal):
     def __init__(self, lang: str) -> None:
+        lang = "en"
         super().__init__(title=t("ver_modal_title", lang), timeout=900)
         self.lang = lang
-        self.steam = discord.ui.TextInput(label=t("ver_f_steam", lang), placeholder="https://steamcommunity.com/profiles/7656…", max_length=200)
+        self.steam = discord.ui.TextInput(label=t("ver_f_steam", lang), placeholder="https://steamcommunity.com/profiles/7656…", required=False, max_length=200)
         self.name = discord.ui.TextInput(label=t("ver_f_name", lang), max_length=40)
         self.regiment = discord.ui.TextInput(label=t("ver_f_regiment", lang), required=False, max_length=40)
-        self.voucher = discord.ui.TextInput(label=t("ver_f_voucher", lang), required=False, max_length=80)
-        for item in (self.steam, self.name, self.regiment, self.voucher):
-            self.add_item(item)
+        self.language = discord.ui.Select(
+            placeholder="Choose Russian or English", min_values=1, max_values=1, required=True,
+            options=[discord.SelectOption(label="Russian", value="ru"),
+                     discord.SelectOption(label="English", value="en")],
+        )
+        for label, item in (("In-game name", self.name), ("Clan (optional)", self.regiment),
+                            ("Steam profile (optional)", self.steam)):
+            self.add_item(discord.ui.Label(text=label, component=item))
+        self.add_item(discord.ui.Label(text="Language after verification", component=self.language))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         bot: WardenBot = interaction.client  # type: ignore[assignment]
@@ -93,9 +100,16 @@ class VerifyModal(discord.ui.Modal):
             await reply(interaction, t("err_guild_only", lang))
             return
         try:
-            ref = parse_steam(self.steam.value)
+            ref = parse_steam(self.steam.value) if self.steam.value.strip() else None
         except ParseError as exc:
             await reply(interaction, parse_error_text(exc, lang))
+            return
+        if self.language.values not in (["ru"], ["en"]):
+            await reply(interaction, "Choose Russian or English.")
+            return
+        language = self.language.values[0]
+        if not self.name.value.strip():
+            await reply(interaction, "Enter your in-game name.")
             return
         now = utcnow()
         code = generate_code()
@@ -108,7 +122,7 @@ class VerifyModal(discord.ui.Modal):
             if block:
                 return block
             flags = []
-            others = repo.steam_conflicts(conn, ref.key, member.id)
+            others = repo.steam_conflicts(conn, ref.key, member.id) if ref else []
             if others:
                 flags.append("dup_steam:" + ",".join(str(i) for i in others[:5]))
             if young:
@@ -116,11 +130,12 @@ class VerifyModal(discord.ui.Modal):
             if user["last_reject_at"]:
                 flags.append("previously_rejected")
             repo.req_create(
-                conn, interaction.guild.id, member.id, code, ref.key, ref.url,
-                self.name.value.strip(), self.regiment.value.strip(), self.voucher.value.strip(),
-                ";".join(flags), now,
+                conn, interaction.guild.id, member.id, code, ref.key if ref else "", ref.url if ref else "",
+                self.name.value.strip(), self.regiment.value.strip(), "",
+                ";".join(flags), now, language=language,
             )
-            repo.user_update(conn, member.id, now, status="pending")
+            repo.user_update(conn, member.id, now, status="pending", language=language)
+            repo.role_job_set(conn, interaction.guild.id, member.id, "unverified")
             return None
 
         block = await bot.db.write(work)
@@ -140,37 +155,39 @@ def flag_lines(flags: str) -> list[str]:
     for part in filter(None, flags.split(";")):
         if part.startswith("dup_steam:"):
             ids = part.split(":", 1)[1].split(",")
-            out.append("⚠ Тот же Steam у других аккаунтов · Same Steam as: " + ", ".join(f"<@{i}>" for i in ids if i.isdigit()))
+            out.append("⚠ Тот же Steam у других аккаунтов: " + ", ".join(f"<@{i}>" for i in ids if i.isdigit()))
         elif part == "young_account":
-            out.append("⚠ Новый аккаунт Discord · Young Discord account")
+            out.append("⚠ Новый аккаунт Discord")
         elif part == "previously_rejected":
-            out.append("⚠ Ранее отклонялся · Previously rejected")
+            out.append("⚠ Ранее отклонялся")
     return out
 
 
 def build_review_embed(req, member: discord.abc.User | None, status: str = "pending", note: str = "") -> discord.Embed:
     user_id = req["user_id"]
-    embed = discord.Embed(title=f"Допуск #{req['id']} · Verification", color=STATUS_COLOR.get(status, BLUE))
+    embed = discord.Embed(title=f"Допуск #{req['id']}", color=STATUS_COLOR.get(status, BLUE))
     created = f"<t:{int(member.created_at.timestamp())}:R>" if member is not None else "?"
-    embed.add_field(name="Игрок · Player", value=f"<@{user_id}>\nDiscord: {created}", inline=True)
-    embed.add_field(name="Ник · Name", value=req["ingame_name"] or "—", inline=True)
-    embed.add_field(name="Полк · Regiment", value=req["regiment"] or "—", inline=True)
-    embed.add_field(name="Steam", value=req["steam_url"], inline=False)
-    embed.add_field(name="Поручитель · Voucher", value=req["voucher_text"] or "—", inline=True)
-    embed.add_field(name="Код · Code", value=f"`{req['code']}`", inline=True)
+    embed.add_field(name="Игрок", value=f"<@{user_id}>\nDiscord: {created}", inline=True)
+    embed.add_field(name="Ник", value=req["ingame_name"] or "—", inline=True)
+    embed.add_field(name="Клан", value=req["regiment"] or "—", inline=True)
+    embed.add_field(name="Steam", value=req["steam_url"] or "—", inline=False)
+    embed.add_field(name="Поручитель", value=req["voucher_text"] or "—", inline=True)
+    embed.add_field(name="Код", value=f"`{req['code']}`", inline=True)
+    language = req["language"] if "language" in req.keys() else "en"
+    embed.add_field(name="Выбранный язык", value="Русский" if language == "ru" else "Английский")
     flags = flag_lines(req["flags"] or "")
     if flags:
-        embed.add_field(name="Флаги · Flags", value="\n".join(flags)[:1000], inline=False)
+        embed.add_field(name="Флаги", value="\n".join(flags)[:1000], inline=False)
     if note:
-        embed.add_field(name="Решение · Decision", value=note[:1000], inline=False)
+        embed.add_field(name="Решение", value=note[:1000], inline=False)
     return embed
 
 
 class ReviewButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:ver:(?P<id>\d+):(?P<action>approve|reject|info)"):
     LABELS = {
-        "approve": ("Допустить · Approve", discord.ButtonStyle.success),
-        "reject": ("Отклонить · Reject", discord.ButtonStyle.danger),
-        "info": ("Нужно уточнение · Need info", discord.ButtonStyle.secondary),
+        "approve": ("Подтвердить", discord.ButtonStyle.success),
+        "reject": ("Отклонить", discord.ButtonStyle.danger),
+        "info": ("Нужно уточнение", discord.ButtonStyle.secondary),
     }
 
     def __init__(self, req_id: int, action: str) -> None:
@@ -185,7 +202,7 @@ class ReviewButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:ver:
 
     async def callback(self, interaction: discord.Interaction) -> None:
         bot: WardenBot = interaction.client  # type: ignore[assignment]
-        lang = lang_of(interaction)
+        lang = "ru"
         if not isinstance(interaction.user, discord.Member) or not can_screen(bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
@@ -198,14 +215,15 @@ class ReviewButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:ver:
 
 def review_view(req_id: int) -> discord.ui.View:
     view = discord.ui.View(timeout=None)
-    for action in ("approve", "reject", "info"):
+    for action in ("approve", "reject"):
         view.add_item(ReviewButton(req_id, action))
     return view
 
 
 class ReasonModal(discord.ui.Modal):
     def __init__(self, req_id: int, action: str, lang: str, message: discord.Message | None) -> None:
-        super().__init__(title=t("ver_reason_title", lang), timeout=600)
+        lang = "ru"
+        super().__init__(title="Причина решения", timeout=600)
         self.req_id, self.action, self.lang, self.message = req_id, action, lang, message
         self.reason = discord.ui.TextInput(
             label=t("ver_reason_label", lang), style=discord.TextStyle.paragraph, max_length=500,
@@ -228,10 +246,13 @@ async def decide(
     message: discord.Message | None = None,
 ) -> None:
     bot: WardenBot = interaction.client  # type: ignore[assignment]
-    lang = lang_of(interaction)
+    lang = "ru"
     guild = interaction.guild
     if guild is None or not isinstance(interaction.user, discord.Member) or not can_screen(bot, interaction.user):
         await reply(interaction, t("err_no_perm", lang))
+        return
+    if status == "rejected" and not reason.strip():
+        await reply(interaction, "Укажите причину отказа.")
         return
     message = message or interaction.message
     now = utcnow()
@@ -250,10 +271,12 @@ async def decide(
             repo.user_update(
                 conn, uid, now, status="admitted", rank="recruit", admitted_at=to_iso(now),
                 admitted_by=interaction.user.id, steam_key=req["steam_key"], steam_url=req["steam_url"],
-                ingame_name=req["ingame_name"], regiment=req["regiment"],
+                ingame_name=req["ingame_name"], regiment=req["regiment"], language=req["language"],
             )
         elif status == "rejected":
             repo.user_update(conn, uid, now, status="rejected", last_reject_at=to_iso(now))
+        if status in ("approved", "rejected"):
+            repo.role_job_set(conn, guild.id, uid, "recruit" if status == "approved" else "rejected")
         return req, True
 
     req, ok = await bot.db.write(work)
@@ -262,25 +285,24 @@ async def decide(
         return
     uid = req["user_id"]
     member = guild.get_member(uid)
-    if status == "approved" and member is not None:
-        try:
-            await set_rank_roles(bot, member, "recruit", reason=f"Verification #{req_id}")
-        except discord.HTTPException:
-            log.warning("Could not grant recruit role to %s", uid, exc_info=True)
+    roles_ready = True
+    if status in ("approved", "rejected"):
+        roles_ready = await sync_member_roles(bot, guild, uid)
     if member is not None:
         key = {"approved": "ver_approved_dm", "rejected": "ver_rejected_dm", "needs_info": "ver_info_dm"}[status]
-        text = f"{t(key, 'ru', reason=reason)}\n{t(key, 'en', reason=reason)}"
+        text = t(key, req["language"] if status == "approved" else "en", reason=reason)
         await safe_dm(member, text)
     # Update the card: drop the buttons and the screenshot.
     if message is not None:
-        note = f"{status} · <@{interaction.user.id}>" + (f"\n{reason}" if reason else "")
+        decision = {"approved": "Подтверждено", "rejected": "Отклонено", "needs_info": "Нужно уточнение"}[status]
+        note = f"{decision} · <@{interaction.user.id}>" + (f"\n{reason}" if reason else "")
         embed = build_review_embed(req, member, status, note)
         try:
             await message.edit(embed=embed, view=None, attachments=[])
         except discord.HTTPException:
             log.warning("Could not update review card", exc_info=True)
-    await audit(bot, guild, interaction.user, f"Verification {status}", f"<@{uid}>", reason)
-    await interaction.followup.send(t("ver_done_ok", lang), ephemeral=True)
+    await audit(bot, guild, interaction.user, {"approved": "Допуск подтверждён", "rejected": "Допуск отклонён", "needs_info": "Запрошено уточнение"}[status], f"<@{uid}>", reason)
+    await interaction.followup.send("Решение сохранено." if roles_ready else "Решение сохранено. Выдача ролей ожидает повтора; проверьте права бота.", ephemeral=True)
 
 
 class VerificationCog(commands.Cog):
@@ -291,12 +313,12 @@ class VerificationCog(commands.Cog):
         self.bot.add_view(VerifyPanelView())
         self.bot.add_dynamic_items(ReviewButton)
 
-    verify = app_commands.Group(name="verify", description="Verification · Допуск", guild_only=True)
+    verify = app_commands.Group(name="verify", description="Verification", guild_only=True)
 
-    @verify.command(name="screenshot", description="Send the screenshot for your request · Отправить скриншот")
-    @app_commands.describe(image="Screenshot with your code on it · Скриншот с вашим кодом")
+    @verify.command(name="screenshot", description="Send ONE screenshot showing F1 and the in-game chat with your code")
+    @app_commands.describe(image="One screenshot: F1 and in-game chat with your code")
     async def screenshot(self, interaction: discord.Interaction, image: discord.Attachment) -> None:
-        lang = lang_of(interaction)
+        lang = "en"
         member = interaction.user
         guild = interaction.guild
         if guild is None or not isinstance(member, discord.Member):
@@ -333,9 +355,9 @@ class VerificationCog(commands.Cog):
             return
         await interaction.followup.send(t("ver_sent", lang), ephemeral=True)
 
-    @verify.command(name="status", description="Check your request · Статус заявки")
+    @verify.command(name="status", description="Check your verification request")
     async def status(self, interaction: discord.Interaction) -> None:
-        lang = lang_of(interaction)
+        lang = "en"
         req = await self.bot.db.read(lambda conn: repo.req_latest_for_user(conn, interaction.user.id))
         if req is None:
             await reply(interaction, t("ver_status_none", lang))

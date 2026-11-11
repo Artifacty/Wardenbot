@@ -10,7 +10,7 @@ from discord.ext import commands
 
 from .. import repo
 from ..bot import WardenBot
-from ..i18n import lang_of, t
+from ..i18n import user_language, t
 from ..perms import can_staff
 from ..services import BLUE, audit, get_text_channel, reply, report_error, utcnow
 
@@ -65,7 +65,7 @@ class PriorityModal(discord.ui.Modal):
         if message is None:
             message = await channel.send(embed=embed)
             await bot.db.write(repo.priority_set_message, guild.id, self.slot, channel.id, message.id)
-        await audit(bot, guild, interaction.user, "Objective updated", f"#{self.slot}", self.title_en.value[:100])
+        await audit(bot, guild, interaction.user, "Цель обновлена", f"#{self.slot}", self.title_en.value[:100])
         await interaction.followup.send(t("pri_saved", self.lang, slot=self.slot), ephemeral=True)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
@@ -81,7 +81,7 @@ class PrioritiesCog(commands.Cog):
     @priority.command(name="set", description="Publish or edit an objective · Опубликовать или изменить цель")
     @app_commands.describe(slot="Objective number 1-5 · Номер цели")
     async def set_(self, interaction: discord.Interaction, slot: app_commands.Range[int, 1, SLOTS]) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None or not can_staff(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
@@ -90,7 +90,7 @@ class PrioritiesCog(commands.Cog):
 
     @priority.command(name="clear", description="Remove an objective · Удалить цель")
     async def clear(self, interaction: discord.Interaction, slot: app_commands.Range[int, 1, SLOTS]) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         guild = interaction.guild
         if not isinstance(interaction.user, discord.Member) or guild is None or not can_staff(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
@@ -105,7 +105,7 @@ class PrioritiesCog(commands.Cog):
                 await channel.get_partial_message(row["message_id"]).delete()
             except discord.HTTPException:
                 pass
-        await audit(self.bot, guild, interaction.user, "Objective removed", f"#{slot}")
+        await audit(self.bot, guild, interaction.user, "Цель удалена", f"#{slot}")
         await reply(interaction, t("pri_cleared", lang, slot=slot))
 
 

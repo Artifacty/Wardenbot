@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -42,6 +43,7 @@ class WardenBot(commands.Bot):
         self.config = config
         self.db = db
         self.rank_rules = RankRules(config.private_after_days, config.sergeant_after_ops)
+        self.role_sync_locks: dict[tuple[int, int], asyncio.Lock] = {}
         self._cfg: dict[int, dict[str, str]] = {}
         self.tree.on_error = self._on_tree_error  # type: ignore[assignment]
 

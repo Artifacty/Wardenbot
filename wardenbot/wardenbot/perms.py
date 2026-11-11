@@ -32,7 +32,7 @@ def can_staff(bot: "WardenBot", member: discord.Member) -> bool:
 
 
 def can_screen(bot: "WardenBot", member: discord.Member) -> bool:
-    return is_admin(member) or has_any(bot, member, ("staff", "command", "counterintel"))
+    return is_admin(member) or has_any(bot, member, ("staff", "command"))
 
 
 def can_create_ops(bot: "WardenBot", member: discord.Member) -> bool:

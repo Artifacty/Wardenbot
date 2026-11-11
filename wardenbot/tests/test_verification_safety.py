@@ -115,6 +115,7 @@ def test_previously_opened_modal_cannot_bypass_current_state(status):
             rid = await db.write(request)
             await db.write(repo.req_set_screenshot, rid, 'a.png')
         modal = verification.VerifyModal('en')
+        modal.language._values = ['en']
         modal.steam._value = '76561198000000000'
         modal.name._value = 'Player'
         await modal.on_submit(i)
@@ -170,7 +171,7 @@ def test_current_card_can_be_approved_once(monkeypatch):
         i.guild.get_member = lambda uid: applicant
         i.message = SimpleNamespace(id=100, edit=AsyncMock())
         roles = AsyncMock()
-        monkeypatch.setattr(verification, 'set_rank_roles', roles)
+        monkeypatch.setattr(verification, 'sync_member_roles', roles)
         monkeypatch.setattr(verification, 'safe_dm', AsyncMock())
         monkeypatch.setattr(verification, 'audit', AsyncMock())
         await verification.decide(i, rid, 'approved', '')

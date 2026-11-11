@@ -44,7 +44,7 @@ def cfg_all(conn: sqlite3.Connection, guild_id: int) -> dict[str, str]:
 
 # ------------------------------------------------------------------- users --
 USER_FIELDS = {
-    "tz", "status", "rank", "admitted_at", "admitted_by", "steam_key", "steam_url",
+    "language", "tz", "status", "rank", "admitted_at", "admitted_by", "steam_key", "steam_url",
     "ingame_name", "regiment", "signup_blocked_until", "last_reject_at",
 }
 
@@ -103,7 +103,10 @@ def req_create(
     voucher_text: str,
     flags: str,
     now: datetime,
+    language: str = "en",
 ) -> int:
+    if language not in ("ru", "en"):
+        raise ValueError("unsupported language")
     # A new attempt replaces any unfinished one.
     conn.execute(
         "UPDATE verification_requests SET status='rejected', reason='superseded' "
@@ -112,8 +115,8 @@ def req_create(
     )
     cur = conn.execute(
         "INSERT INTO verification_requests(guild_id,user_id,code,steam_key,steam_url,ingame_name,regiment,"
-        "voucher_text,flags,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (guild_id, user_id, code, steam_key, steam_url, ingame_name, regiment, voucher_text, flags, _now_iso(now)),
+        "voucher_text,flags,created_at,language) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (guild_id, user_id, code, steam_key, steam_url, ingame_name, regiment, voucher_text, flags, _now_iso(now), language),
     )
     return int(cur.lastrowid)
 
@@ -432,3 +435,32 @@ def audit_add(
         "INSERT INTO audit_log(guild_id,ts,actor_id,action,target,details) VALUES (?,?,?,?,?,?)",
         (guild_id, _now_iso(now), actor_id, action, target, details[:1000]),
     )
+
+
+# Durable desired roles: acknowledge only the revision actually applied.
+def role_job_set(conn, guild_id: int, user_id: int, target: str) -> None:
+    if target not in ('unverified', 'rejected', 'recruit', 'private', 'sergeant'):
+        raise ValueError('invalid access role')
+    conn.execute(
+        "INSERT INTO role_jobs(guild_id,user_id,target) VALUES (?,?,?) "
+        "ON CONFLICT(guild_id,user_id) DO UPDATE SET target=excluded.target, "
+        "revision=role_jobs.revision+1, last_error=NULL", (guild_id, user_id, target))
+
+
+def role_job_get(conn, guild_id: int, user_id: int):
+    return conn.execute("SELECT * FROM role_jobs WHERE guild_id=? AND user_id=?",
+                        (guild_id, user_id)).fetchone()
+
+
+def role_jobs_pending(conn):
+    return conn.execute("SELECT * FROM role_jobs WHERE applied_revision<revision").fetchall()
+
+
+def role_job_ack(conn, guild_id: int, user_id: int, revision: int) -> None:
+    conn.execute("UPDATE role_jobs SET applied_revision=?, last_error=NULL "
+                 "WHERE guild_id=? AND user_id=? AND revision=?", (revision, guild_id, user_id, revision))
+
+
+def role_job_error(conn, guild_id: int, user_id: int, revision: int, error: str) -> None:
+    conn.execute("UPDATE role_jobs SET last_error=? WHERE guild_id=? AND user_id=? AND revision=?",
+                 (error, guild_id, user_id, revision))

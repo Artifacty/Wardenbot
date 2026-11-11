@@ -96,8 +96,10 @@ _add("ver_f_voucher", "Кто может поручиться (ник Discord)",
 _add("ver_started",
      "Заявка создана. Теперь сделайте скриншот Foxhole, где видно, что вы играете за Варденов, и впишите на экран или в игровой чат код **{code}**. "
      "Затем выполните команду `/verify screenshot` и приложите файл. Код действует только для этой заявки.",
-     "Your request is created. Take a Foxhole screenshot that shows you play for the Wardens and put the code **{code}** on the screen or in the game chat. "
-     "Then run `/verify screenshot` and attach the file. The code is valid only for this request.")
+     "Your request is created. Type **{code}** in the in-game chat. Take ONE screenshot showing "
+     "both F1 and the chat containing your code. Run `/verify screenshot` and attach that image. "
+     "This code is bound to you and this request; a moderator will check the screenshot.")
+
 _add("ver_no_open", "Нет заявки, ожидающей скриншот. Нажмите кнопку допуска в канале {verify}.",
      "No request is waiting for a screenshot. Press the verification button in {verify}.")
 _add("ver_bad_image", "Нужен файл-картинка (png, jpg, webp) размером до 10 МБ.",
@@ -109,8 +111,8 @@ _add("ver_no_review", "Канал очереди допуска не настр�
 _add("ver_status_none", "У вас нет заявки.", "You have no request.")
 _add("ver_status", "Статус заявки: {status}.", "Request status: {status}.")
 _add("ver_decided", "Заявка уже обработана.", "This request has already been handled.")
-_add("ver_approved_dm", "Допуск одобрен. Добро пожаловать, рекрут! Загляните в канал с операциями.",
-     "Verification approved. Welcome, recruit! Take a look at the operations board.")
+_add("ver_approved_dm", "Допуск одобрен. Добро пожаловать! Роль доступа будет синхронизирована автоматически.",
+     "Verification approved. Welcome! Your access role will be synchronized automatically.")
 _add("ver_rejected_dm", "Допуск отклонён. Причина: {reason}", "Verification rejected. Reason: {reason}")
 _add("ver_info_dm", "По вашей заявке нужны уточнения: {reason}. Выполните `/verify screenshot` с новым скриншотом или напишите штабу.",
      "The staff needs more information: {reason}. Run `/verify screenshot` with a new screenshot or contact the staff.")
@@ -231,3 +233,17 @@ _add("role_added", "Роль добавлена: {role}.", "Role added: {role}."
 _add("role_removed", "Роль снята: {role}.", "Role removed: {role}.")
 _add("role_missing", "Роль не настроена. Администратор должен выполнить /setup run.",
      "The role is not configured. An administrator must run /setup run.")
+
+
+async def user_language(interaction) -> str:
+    """English before admission, stored preference afterwards; staff channels are Russian."""
+    from . import repo
+    guild = interaction.guild
+    if guild is not None:
+        cfg = interaction.client.cfg(guild.id)
+        if str(getattr(interaction, 'channel_id', None)) in {
+            cfg.get('ch.' + key) for key in ('mod', 'screening', 'audit_log', 'bot_admin', 'command_voice')
+        }:
+            return 'ru'
+    user = await interaction.client.db.read(repo.user_get, interaction.user.id)
+    return user['language'] if user is not None and user['status'] == 'admitted' else 'en'

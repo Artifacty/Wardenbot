@@ -14,7 +14,7 @@ from discord.ext import commands, tasks
 
 from .. import repo
 from ..bot import WardenBot
-from ..i18n import lang_of, parse_error_text, t
+from ..i18n import user_language, parse_error_text, t
 from ..opsmeta import (
     DEFAULT_SLOTS, DEFAULT_SUPPLY, DONE, LANG_TAG, LANGS, OP_TYPES, OPEN, RUNNING,
     STATUS_TAG, TYPE_TAG, URGENT_TAG,
@@ -615,7 +615,7 @@ class OperationsCog(commands.Cog):
     async def create(
         self, interaction: discord.Interaction, type: app_commands.Choice[str], language: app_commands.Choice[str],
     ) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         member = interaction.user
         if interaction.guild is None or not isinstance(member, discord.Member):
             await reply(interaction, t("err_guild_only", lang))
@@ -639,7 +639,7 @@ class OperationsCog(commands.Cog):
     @operation.command(name="noshow", description="Record a no-show · Отметить неявку")
     @app_commands.describe(operation="Operation · Операция", player="Player who did not show up · Игрок")
     async def noshow(self, interaction: discord.Interaction, operation: int, player: discord.Member) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         member = interaction.user
         op = await self.bot.db.read(repo.op_get, operation)
         if op is None or op["guild_id"] != getattr(interaction.guild, "id", None):
@@ -669,7 +669,7 @@ class OperationsCog(commands.Cog):
 
     # --------------------------------------------------------- button handlers --
     async def on_signup(self, interaction: discord.Interaction, op_id: int) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         member = interaction.user
         guild = interaction.guild
         if guild is None or not isinstance(member, discord.Member):
@@ -698,14 +698,14 @@ class OperationsCog(commands.Cog):
         await reply(interaction, t("op_signup_title", lang), view=SlotSelectView(self, op_id, lang, view.slots, current))
 
     async def on_leave(self, interaction: discord.Interaction, op_id: int) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         ok = await self.bot.db.write(repo.leave, op_id, interaction.user.id)
         await reply(interaction, t("op_left" if ok else "op_not_signed", lang))
         if ok:
             self.request_refresh(op_id)
 
     async def on_brief(self, interaction: discord.Interaction, op_id: int) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         op = await self.bot.db.read(repo.op_get, op_id)
         member = interaction.user
         if op is None or not isinstance(member, discord.Member):
@@ -727,7 +727,7 @@ class OperationsCog(commands.Cog):
         await reply(interaction, embed=embed)
 
     async def on_manage(self, interaction: discord.Interaction, op_id: int) -> None:
-        lang = lang_of(interaction)
+        lang = await user_language(interaction)
         op = await self.bot.db.read(repo.op_get, op_id)
         member = interaction.user
         if op is None or not isinstance(member, discord.Member) or not can_manage_op(self.bot, member, op["organizer_id"]):

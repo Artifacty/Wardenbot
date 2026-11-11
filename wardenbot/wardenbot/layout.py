@@ -25,35 +25,41 @@ class RoleDef:
 
     @property
     def name(self) -> str:
-        return f"{self.symbol} {self.ru} · {self.en}"
+        return self.en
 
 
 # Listed from the highest to the lowest. Discord puts new roles at the bottom, so
 # the setup command creates them in this order.
 ROLES: tuple[RoleDef, ...] = (
-    RoleDef("command", "★", "Командование", "Command", 0xC9A227, hoist=True, admin=True),  # admin = may also ban; never Discord Administrator
-    RoleDef("staff", "◆", "Штаб", "Staff", 0x3C8DD6, hoist=True, moderator=True),
+    RoleDef("command", "★", "Командование", "Admin", 0xC9A227, hoist=True, admin=True),  # admin = may also ban; never Discord Administrator
+    RoleDef("staff", "◆", "Штаб", "Moderator", 0x3C8DD6, hoist=True, moderator=True),
     RoleDef("counterintel", "⌖", "Контрразведка", "Counterintel", 0x6C5CE7, hoist=True),
-    RoleDef("regiment_co", "❖", "Командир полка", "Regiment CO", 0x2E86AB, hoist=True),
+    RoleDef("regiment_co", "❖", "Командир полка", "Clan Leader", 0x2E86AB, hoist=True),
+    RoleDef("clan_delegate", "", "Доверенный клана", "Clan Delegate", 0x4DA3D9),
+    RoleDef("unverified", "", "Не проверен", "Unverified", 0x95A5A6),
+    RoleDef("rejected", "", "Отказ в проверке", "Verification Rejected", 0x8B3A3A),
     RoleDef("ops_officer", "◇", "Офицер операций", "Ops Officer", 0x4DA3D9, hoist=True),
-    RoleDef("sergeant", "›››", "Сержант", "Sergeant", 0x7FB3E0),
-    RoleDef("private", "››", "Рядовой", "Private", 0x9CC4E8),
-    RoleDef("recruit", "›", "Рекрут", "Recruit", 0xBAD6EE),
+    RoleDef("sergeant", "›››", "Сержант", "Veteran", 0x7FB3E0),
+    RoleDef("private", "››", "Рядовой", "Member", 0x9CC4E8),
+    RoleDef("recruit", "›", "Рекрут", "Verified", 0xBAD6EE),
     RoleDef("ally", "○", "Союзник", "Ally", 0x95A5A6),
     RoleDef("lang_ru", "", "Язык: русский", "Language: Russian", 0x5D6D7E),
     RoleDef("lang_en", "", "Язык: английский", "Language: English", 0x5D6D7E),
     RoleDef("ping_ops", "", "Пинг: операции", "Ping: operations", 0x34495E, mentionable=True),
     RoleDef("ping_logi", "", "Пинг: логистика", "Ping: logistics", 0x34495E, mentionable=True),
 )
+# Retained only when already present; new setups use the nine access/management roles
+# plus the two existing opt-in notification roles. Language is a database preference.
+LEGACY_ROLE_KEYS = frozenset({"counterintel", "ops_officer", "ally", "lang_ru", "lang_en"})
 ROLE_BY_KEY = {r.key: r for r in ROLES}
 
 
 def role_display_name(role: RoleDef) -> str:
-    return role.name if role.symbol else f"{role.ru} · {role.en}"
+    return role.en
 
 
 RANK_ROLES = ("recruit", "private", "sergeant")
-STAFF_ROLES = ("staff", "counterintel", "command")
+STAFF_ROLES = ("staff", "command")
 # Access levels: who sees a channel. Ranks are cumulative.
 _RANK_CHAIN = {"recruit": RANK_ROLES, "private": RANK_ROLES[1:], "sergeant": RANK_ROLES[2:]}
 
@@ -71,7 +77,7 @@ def viewer_roles(access: str) -> tuple[str, ...]:
     if access == "command":
         return ("command",)
     if access == "co":
-        return ("regiment_co", "staff", "command")
+        return ("regiment_co", "clan_delegate", "staff", "command")
     raise KeyError(f"unknown access level: {access}")
 
 
@@ -97,6 +103,10 @@ class ChannelDef:
     guidelines: str = ""
 
     def name(self, style: str = "full") -> str:
+        if self.access == "public":
+            style = "en"
+        elif self.access in ("staff", "screening", "command"):
+            style = "ru"
         if style == "ru":
             body = f"{self.symbol}┃{self.ru}"
         elif style == "en":
@@ -107,6 +117,10 @@ class ChannelDef:
 
     @property
     def topic(self) -> str:
+        if self.access == "public":
+            return self.topic_en[:1024]
+        if self.access in ("staff", "screening", "command"):
+            return self.topic_ru[:1024]
         return f"{self.topic_ru}\n{self.topic_en}"[:1024]
 
 
@@ -122,6 +136,10 @@ class CategoryDef:
 
     @property
     def name(self) -> str:
+        if self.key == "entry":
+            return f"{self.number} // {self.en} {self.emoji}"
+        if self.key == "command":
+            return f"{self.number} // {self.ru} {self.emoji}"
         return f"{self.number} // {self.ru} · {self.en} {self.emoji}"
 
 
@@ -139,7 +157,7 @@ CATEGORIES: tuple[CategoryDef, ...] = (
             "Кнопка допуска. Писать в канал нельзя, бот отвечает только вам.",
             "Verification button. You cannot post here; the bot replies only to you.", "public", "ro"),
         _ch("news", "text", "⬢", "новости", "news", "📰",
-            "Новости сервера и бота.", "Server and bot news.", "public", "ro"),
+            "Новости сервера и бота.", "Server and bot news.", "recruit", "ro"),
     )),
     CategoryDef("hq", "01", "ШТАБ", "HQ", "🏛️", "private", (
         _ch("objectives", "text", "⬢", "цели", "objectives", "🎯",
