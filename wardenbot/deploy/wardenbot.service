@@ -1,0 +1,26 @@
+# /etc/systemd/system/wardenbot.service
+# Assumes: user "wardenbot", code in /opt/wardenbot, virtualenv in /opt/wardenbot/.venv,
+# settings in /opt/wardenbot/.env  (chmod 600, owned by wardenbot).
+[Unit]
+Description=Warden Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wardenbot
+WorkingDirectory=/opt/wardenbot
+Environment=DB_PATH=/opt/wardenbot/data/wardenbot.db
+ExecStart=/opt/wardenbot/.venv/bin/python -m wardenbot
+Restart=always
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/wardenbot/data /opt/wardenbot/backups
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Backup of the Warden bot database
+
+[Service]
+Type=oneshot
+User=wardenbot
+WorkingDirectory=/opt/wardenbot
+ExecStart=/opt/wardenbot/.venv/bin/python tools/backup.py data/wardenbot.db backups
+ReadWritePaths=/opt/wardenbot/data /opt/wardenbot/backups

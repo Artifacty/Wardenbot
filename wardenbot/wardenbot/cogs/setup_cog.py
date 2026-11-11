@@ -1,0 +1,333 @@
+"""/setup: builds roles, categories, channels, permissions, forum tags, AutoMod and the info panels."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from ..bot import WardenBot
+from ..i18n import lang_of, t
+from ..invite import role_permissions
+from ..layout import CATEGORIES, ROLES, CategoryDef, ChannelDef, role_display_name
+from ..invite import required_permission_names
+from ..perm_layout import category_overwrites, channel_overwrites
+from ..perms import is_admin
+from ..services import BLUE, audit, get_text_channel, reply
+
+log = logging.getLogger(__name__)
+TEXTS = Path(__file__).resolve().parent.parent / "texts"
+
+AUTOMOD_NAME = "Warden: stockpile codes"
+AUTOMOD_REGEX = r"\b\d{6}\b"  # Discord uses Rust regex: no lookaround
+
+
+def read_text(name: str) -> str:
+    return (TEXTS / name).read_text(encoding="utf-8").strip()
+
+
+class SetupCog(commands.Cog):
+    def __init__(self, bot: WardenBot) -> None:
+        self.bot = bot
+
+    setup = app_commands.Group(
+        name="setup", description="Set up the server · Настройка сервера",
+        default_permissions=discord.Permissions(administrator=True), guild_only=True,
+    )
+
+    # --------------------------------------------------------------- roles --
+    async def _ensure_roles(self, guild: discord.Guild, log_lines: list[str]) -> dict[str, discord.Role]:
+        cfg = self.bot.cfg(guild.id)
+        result: dict[str, discord.Role] = {}
+        for rd in ROLES:  # highest first
+            role = None
+            stored = cfg.get(f"role.{rd.key}")
+            if stored and stored.isdigit():
+                role = guild.get_role(int(stored))
+            if role is None:
+                name = role_display_name(rd)
+                role = discord.utils.get(guild.roles, name=name)
+            perms = role_permissions(rd)
+            if role is None:
+                role = await guild.create_role(
+                    name=role_display_name(rd), colour=discord.Colour(rd.color), hoist=rd.hoist,
+                    mentionable=rd.mentionable, permissions=perms, reason="Warden setup",
+                )
+                log_lines.append(f"role + {role.name}")
+            await self.bot.set_cfg(guild.id, f"role.{rd.key}", role.id)
+            result[rd.key] = role
+        # Order: our roles go just under the bot's own role, highest first. This only works when
+        # the bot role is placed high enough (at least one place per role below it).
+        top = guild.me.top_role.position
+        if top - len(ROLES) < 1:
+            log_lines.append("role order NOT set: drag the bot role higher in Server Settings > Roles, then run /setup run again")
+        else:
+            try:
+                positions = {result[rd.key]: top - 1 - index for index, rd in enumerate(ROLES)}
+                await guild.edit_role_positions(positions, reason="Warden setup: order roles")
+            except (discord.Forbidden, discord.HTTPException):
+                log_lines.append("role order not changed (move the bot role to the top by hand)")
+        return result
+
+    # ------------------------------------------------------------ channels --
+    def _target_overwrites(
+        self, mapping: dict[str, discord.PermissionOverwrite], roles: dict[str, discord.Role], guild: discord.Guild,
+    ) -> dict[discord.Role | discord.Member, discord.PermissionOverwrite]:
+        out: dict[discord.Role | discord.Member, discord.PermissionOverwrite] = {}
+        for key, ow in mapping.items():
+            if key == "everyone":
+                out[guild.default_role] = ow
+            elif key == "bot":
+                out[guild.me] = ow
+            elif key in roles:
+                out[roles[key]] = ow
+        return out
+
+    async def _ensure_category(
+        self, guild: discord.Guild, cat: CategoryDef, roles: dict[str, discord.Role], log_lines: list[str],
+    ) -> discord.CategoryChannel:
+        cfg = self.bot.cfg(guild.id)
+        existing = None
+        stored = cfg.get(f"cat.{cat.key}")
+        if stored and stored.isdigit():
+            existing = guild.get_channel(int(stored))
+        overwrites = self._target_overwrites(category_overwrites(cat), roles, guild)
+        if isinstance(existing, discord.CategoryChannel):
+            return existing
+        created = await guild.create_category(name=cat.name, overwrites=overwrites, reason="Warden setup")
+        await self.bot.set_cfg(guild.id, f"cat.{cat.key}", created.id)
+        log_lines.append(f"category + {created.name}")
+        return created
+
+    async def _ensure_channel(
+        self, guild: discord.Guild, category: discord.CategoryChannel, ch: ChannelDef,
+        roles: dict[str, discord.Role], fix: bool, log_lines: list[str],
+    ) -> discord.abc.GuildChannel:
+        cfg = self.bot.cfg(guild.id)
+        name = ch.name(self.bot.config.channel_name_style)
+        existing = None
+        stored = cfg.get(f"ch.{ch.key}")
+        if stored and stored.isdigit():
+            existing = guild.get_channel(int(stored))
+        overwrites = self._target_overwrites(channel_overwrites(ch), roles, guild)
+        if existing is not None:
+            if fix:
+                try:
+                    await existing.edit(overwrites=overwrites, reason="Warden setup: fix permissions")
+                    log_lines.append(f"permissions fixed {existing.name}")
+                except discord.HTTPException:
+                    log_lines.append(f"could not fix permissions for {existing.name}")
+            return existing
+        if ch.kind == "text":
+            created = await guild.create_text_channel(
+                name=name, category=category, topic=ch.topic, overwrites=overwrites, reason="Warden setup",
+            )
+        elif ch.kind == "voice":
+            created = await guild.create_voice_channel(
+                name=name, category=category, overwrites=overwrites, reason="Warden setup",
+            )
+        elif ch.kind == "forum":
+            tags = [discord.ForumTag(name=n) for n in ch.forum_tags]
+            created = await guild.create_forum(
+                name=name, category=category, topic=(ch.guidelines or ch.topic)[:4096], overwrites=overwrites,
+                available_tags=tags, reason="Warden setup",
+            )
+        else:  # pragma: no cover
+            raise ValueError(ch.kind)
+        await self.bot.set_cfg(guild.id, f"ch.{ch.key}", created.id)
+        log_lines.append(f"channel + {created.name}")
+        return created
+
+    # ------------------------------------------------------------- automod --
+    async def _ensure_automod(self, guild: discord.Guild, log_lines: list[str]) -> None:
+        try:
+            rules = await guild.fetch_automod_rules()
+            if any(r.name == AUTOMOD_NAME for r in rules):
+                return
+            exempt_channels = [
+                c for key in ("mod", "screening", "bot_admin", "verify")
+                if (c := get_text_channel(self.bot, guild, key)) is not None
+            ]
+            exempt_roles = [r for key in ("staff", "command") if (r := guild.get_role(int(self.bot.cfg(guild.id).get(f"role.{key}", 0) or 0)))]
+            await guild.create_automod_rule(
+                name=AUTOMOD_NAME,
+                event_type=discord.AutoModRuleEventType.message_send,
+                trigger=discord.AutoModTrigger(
+                    type=discord.AutoModRuleTriggerType.keyword, regex_patterns=[AUTOMOD_REGEX],
+                ),
+                actions=[discord.AutoModRuleAction(type=discord.AutoModRuleActionType.block_message,
+                                                   custom_message="Stockpile codes are not allowed here. Коды складов здесь запрещены.")],
+                enabled=True,
+                exempt_roles=exempt_roles,
+                exempt_channels=exempt_channels,
+                reason="Warden setup",
+            )
+            log_lines.append("automod + stockpile codes (exempt: staff channels)")
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            log.warning("AutoMod rule not created: %s", exc)
+            log_lines.append("automod NOT created (create the rule by hand, see README)")
+
+    # ---------------------------------------------------------- guild settings
+    async def _guild_settings(self, guild: discord.Guild, log_lines: list[str]) -> None:
+        try:
+            await guild.edit(
+                verification_level=discord.VerificationLevel.medium,
+                explicit_content_filter=discord.ContentFilter.all_members,
+                default_notifications=discord.NotificationLevel.only_mentions,
+                reason="Warden setup",
+            )
+            log_lines.append("guild settings: verification medium, content filter all members")
+        except (discord.Forbidden, discord.HTTPException):
+            log_lines.append("guild settings not changed")
+        rules = get_text_channel(self.bot, guild, "rules")
+        news = get_text_channel(self.bot, guild, "news")
+        if guild.features and "COMMUNITY" in guild.features and isinstance(rules, discord.TextChannel) and isinstance(news, discord.TextChannel):
+            try:
+                await guild.edit(rules_channel=rules, public_updates_channel=news, reason="Warden setup")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+    # -------------------------------------------------------------- panels --
+    async def _upsert(
+        self, guild: discord.Guild, cfg_key: str, channel: discord.TextChannel, *,
+        embeds: list[discord.Embed], view: discord.ui.View | None = None,
+    ) -> discord.Message:
+        stored = self.bot.cfg(guild.id).get(f"msg.{cfg_key}")
+        if stored and stored.isdigit():
+            try:
+                msg = await channel.fetch_message(int(stored))
+                await msg.edit(embeds=embeds, view=view)
+                return msg
+            except discord.NotFound:
+                pass
+        msg = await channel.send(embeds=embeds, view=view)
+        await self.bot.set_cfg(guild.id, f"msg.{cfg_key}", msg.id)
+        return msg
+
+    async def post_panels(self, guild: discord.Guild) -> list[str]:
+        from .selfroles import build_roles_view
+        from .verification import build_verify_view
+
+        notes: list[str] = []
+        rules = get_text_channel(self.bot, guild, "rules")
+        start = get_text_channel(self.bot, guild, "start")
+        verify = get_text_channel(self.bot, guild, "verify")
+        if isinstance(rules, discord.TextChannel):
+            ru = [discord.Embed(description=read_text(f"rules_ru_{i}.md"), color=BLUE) for i in (1, 2)]
+            en = [discord.Embed(description=read_text(f"rules_en_{i}.md"), color=BLUE) for i in (1, 2)]
+            ru[0].title, en[0].title = "Правила", "Rules"
+            await self._upsert(guild, "rules_ru", rules, embeds=ru)
+            await self._upsert(guild, "rules_en", rules, embeds=en)
+            notes.append("rules")
+        if isinstance(start, discord.TextChannel):
+            embed = discord.Embed(
+                title="Добро пожаловать · Welcome",
+                description=(
+                    "Этот сервер для игроков Варденов в Foxhole: доска операций, объявления, наборы в полки.\n"
+                    "Выберите язык и пинги кнопками ниже, затем пройдите допуск в канале допуска.\n\n"
+                    "This server is for Warden players in Foxhole: an operations board, listings and regiment recruitment.\n"
+                    "Choose your language and pings with the buttons below, then pass verification in the verification channel."
+                ),
+                color=BLUE,
+            )
+            await self._upsert(guild, "start", start, embeds=[embed], view=build_roles_view())
+            notes.append("start")
+        if isinstance(verify, discord.TextChannel):
+            embed = discord.Embed(
+                title="Допуск · Verification",
+                description=(
+                    "Допуск нужен, чтобы закрытые каналы оставались закрытыми. Вам понадобятся ссылка на профиль Steam "
+                    "и скриншот Foxhole с выбранной фракцией Варденов. Нажмите кнопку.\n\n"
+                    "Verification keeps the closed channels closed. You will need your Steam profile link and a Foxhole "
+                    "screenshot showing the Wardens faction. Press the button."
+                ),
+                color=BLUE,
+            )
+            await self._upsert(guild, "verify", verify, embeds=[embed], view=build_verify_view())
+            notes.append("verify")
+        return notes
+
+    # ------------------------------------------------------------ commands --
+    @setup.command(name="run", description="Create or repair roles and channels · Создать или починить роли и каналы")
+    @app_commands.describe(
+        include_later="Also create the channels planned for later stages · Создать и поздние каналы",
+        guild_settings="Apply recommended server security settings · Применить настройки безопасности",
+        fix_permissions="Reset permissions of existing channels to the plan · Вернуть права каналов к плану",
+    )
+    async def setup_run(
+        self, interaction: discord.Interaction, include_later: bool = False,
+        guild_settings: bool = True, fix_permissions: bool = False,
+    ) -> None:
+        lang = lang_of(interaction)
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
+            await reply(interaction, t("err_no_perm", lang))
+            return
+        missing = [p for p in required_permission_names() if not getattr(guild.me.guild_permissions, p)]
+        if missing and not guild.me.guild_permissions.administrator:
+            await reply(interaction, t("setup_missing_perms", lang, perms=", ".join(missing)))
+            return
+        if "COMMUNITY" not in guild.features:
+            await reply(interaction, t("setup_need_community", lang))
+            return
+        await interaction.response.send_message(t("setup_started", lang), ephemeral=True)
+        lines: list[str] = []
+        try:
+            roles = await self._ensure_roles(guild, lines)
+            for cat in CATEGORIES:
+                chans = [c for c in cat.channels if c.launch or include_later]
+                if not chans:
+                    continue
+                category = await self._ensure_category(guild, cat, roles, lines)
+                for ch in chans:
+                    await self._ensure_channel(guild, category, ch, roles, fix_permissions, lines)
+            await self._ensure_automod(guild, lines)
+            if guild_settings:
+                await self._guild_settings(guild, lines)
+            notes = await self.post_panels(guild)
+            lines.append("panels: " + ", ".join(notes))
+        except discord.Forbidden as exc:
+            await interaction.followup.send(f"Forbidden: {exc}. {t('setup_missing_perms', lang, perms='?')}", ephemeral=True)
+            return
+        await audit(self.bot, guild, interaction.user, "Setup", details="; ".join(lines)[:900])
+        body = "\n".join(f"• {line}" for line in lines[:40]) or "—"
+        await interaction.followup.send(f"{t('setup_done', lang)}\n{body}"[:1900], ephemeral=True)
+
+    @setup.command(name="panels", description="Re-post rules, start and verification messages · Обновить сообщения")
+    async def setup_panels(self, interaction: discord.Interaction) -> None:
+        lang = lang_of(interaction)
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
+            await reply(interaction, t("err_no_perm", lang))
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self.post_panels(interaction.guild)
+        await interaction.followup.send(t("setup_panels_done", lang), ephemeral=True)
+
+    @setup.command(name="status", description="Show what is configured · Показать состояние")
+    async def setup_status(self, interaction: discord.Interaction) -> None:
+        lang = lang_of(interaction)
+        guild = interaction.guild
+        if guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
+            await reply(interaction, t("err_no_perm", lang))
+            return
+        cfg = self.bot.cfg(guild.id)
+        lines = []
+        for rd in ROLES:
+            rid = cfg.get(f"role.{rd.key}")
+            ok = bool(rid and rid.isdigit() and guild.get_role(int(rid)))
+            lines.append(f"{'✓' if ok else '✗'} role {rd.key}")
+        for cat in CATEGORIES:
+            for ch in cat.channels:
+                cid = cfg.get(f"ch.{ch.key}")
+                if cid and cid.isdigit() and guild.get_channel(int(cid)):
+                    lines.append(f"✓ #{ch.key}")
+                elif ch.launch:
+                    lines.append(f"✗ #{ch.key}")
+        await reply(interaction, "\n".join(lines)[:1900])
+
+
+async def setup(bot: WardenBot) -> None:
+    await bot.add_cog(SetupCog(bot))

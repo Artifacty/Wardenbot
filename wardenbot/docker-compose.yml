@@ -1,0 +1,19 @@
+services:
+  wardenbot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/wardenbot.db
+    volumes:
+      - wardenbot-data:/data
+    # Small and predictable: the bot needs well under 256 MB.
+    mem_limit: 384m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  wardenbot-data:
