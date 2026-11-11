@@ -339,14 +339,12 @@ def supply_apply(conn: sqlite3.Connection, op_id: int, updates: dict[str, tuple[
 
 
 def op_finish(conn: sqlite3.Connection, op_id: int, now: datetime) -> list[int]:
-    """Mark an operation done. Everybody who did not get an explicit no-show counts as present.
-    Returns the user ids who attended."""
+    """Finish once and return explicitly confirmed attendees only."""
     op = op_get(conn, op_id)
     if op is None or op["status"] not in ("open", "running"):
         return []
-    conn.execute("UPDATE op_signups SET attended=1 WHERE op_id=? AND attended IS NULL", (op_id,))
     conn.execute("UPDATE operations SET status='done', ended_at=? WHERE id=?", (_now_iso(now), op_id))
-    rows = conn.execute("SELECT user_id FROM op_signups WHERE op_id=? AND attended=1", (op_id,)).fetchall()
+    rows = conn.execute("SELECT user_id FROM op_signups WHERE op_id=? AND attended=1 AND confirmed=1", (op_id,)).fetchall()
     return [r["user_id"] for r in rows]
 
 
@@ -379,7 +377,7 @@ def mark_noshow(conn: sqlite3.Connection, op_id: int, user_id: int) -> bool:
 def attended_count(conn: sqlite3.Connection, user_id: int) -> int:
     return conn.execute(
         "SELECT COUNT(*) FROM op_signups s JOIN operations o ON o.id=s.op_id "
-        "WHERE s.user_id=? AND s.attended=1 AND o.status='done'",
+        "WHERE s.user_id=? AND s.attended=1 AND s.confirmed=1 AND o.status='done'",
         (user_id,),
     ).fetchone()[0]
 
@@ -464,3 +462,13 @@ def role_job_ack(conn, guild_id: int, user_id: int, revision: int) -> None:
 def role_job_error(conn, guild_id: int, user_id: int, revision: int, error: str) -> None:
     conn.execute("UPDATE role_jobs SET last_error=? WHERE guild_id=? AND user_id=? AND revision=?",
                  (error, guild_id, user_id, revision))
+
+
+
+def confirm_attendance(conn, op_id: int, user_id: int, attended: bool) -> bool:
+    """Confirm a registered participant; permit explicit correction of completed history."""
+    cur = conn.execute(
+        "UPDATE op_signups SET attended=?, confirmed=1 WHERE op_id=? AND user_id=? "
+        "AND EXISTS (SELECT 1 FROM operations WHERE id=? AND status IN ('open','running','done'))",
+        (int(attended), op_id, user_id, op_id))
+    return cur.rowcount == 1

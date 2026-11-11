@@ -23,7 +23,7 @@ from ..opsplan import Action, OpTimes, plan_actions
 from ..perms import can_create_ops, can_manage_op, can_staff, is_admitted
 from ..ranks import noshow_block_until
 from ..render import Card, OpView, SlotView, SupplyView, build_card, thread_title
-from ..services import channel_mention, evaluate_member, get_role, get_text_channel, report_error, reply, utcnow
+from ..services import audit, channel_mention, evaluate_member, get_role, get_text_channel, report_error, reply, utcnow
 from ..slots import SlotSpec, SupplySpec, parse_slots, parse_supply, parse_supply_progress
 from ..timeutil import ParseError, from_iso, parse_duration_hours, parse_local_datetime, resolve_tz, tz_from_name
 
@@ -651,6 +651,28 @@ class OperationsCog(commands.Cog):
         ok = await self.bot.db.write(repo.mark_noshow, operation, player.id)
         await reply(interaction, t("op_noshow_ok" if ok else "op_noshow_missing", lang, user=player.mention),
                     allowed_mentions=discord.AllowedMentions.none())
+
+    @operation.command(name="attendance", description="Confirm actual participation or correct a completed operation")
+    async def attendance(self, interaction: discord.Interaction, operation: int,
+                         player: discord.Member, attended: bool = True) -> None:
+        lang = await user_language(interaction)
+        op = await self.bot.db.read(repo.op_get, operation)
+        if op is None or op['guild_id'] != getattr(interaction.guild, 'id', None):
+            await reply(interaction, t('err_op_missing', lang))
+            return
+        if not isinstance(interaction.user, discord.Member) or not can_manage_op(self.bot, interaction.user, op['organizer_id']):
+            await reply(interaction, t('err_no_perm', lang))
+            return
+        changed = await self.bot.db.write(repo.confirm_attendance, operation, player.id, attended)
+        if not changed:
+            await reply(interaction, "Игрок не записан или операция отменена." if lang == 'ru'
+                        else "The player is not signed up or the operation was cancelled.")
+            return
+        await reply(interaction, "Участие отмечено." if lang == 'ru' else "Attendance recorded.")
+        await audit(self.bot, interaction.guild, interaction.user, "Подтверждение участия",
+                    f"<@{player.id}>", f"Операция #{operation}; присутствовал: {'да' if attended else 'нет'}")
+        if op["status"] == DONE:
+            await evaluate_member(self.bot, interaction.guild, player.id)
 
     @noshow.autocomplete("operation")
     async def noshow_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:

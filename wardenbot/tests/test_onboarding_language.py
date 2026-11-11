@@ -180,3 +180,20 @@ def test_setup_reuses_role_ids_and_preserves_trading_channels():
         existing.edit.assert_not_awaited()
         bot.db.close()
     asyncio.run(go())
+
+
+def test_dev_command_tree_restored_when_remote_sync_is_cached(tmp_path):
+    async def go():
+        path = str(tmp_path / 'sync.db')
+        for expected_syncs in (1, 0):
+            bot = WardenBot(Config(token='unused', dev_guild_id=42), storage.Database(path))
+            await bot._load_cfg()
+            @bot.tree.command(name='probe', description='Check local dispatch')
+            async def probe(interaction):
+                pass
+            bot.tree.sync = AsyncMock(return_value=[])
+            await bot._sync_commands()
+            assert bot.tree.sync.await_count == expected_syncs
+            assert bot.tree.get_command('probe', guild=discord.Object(id=42)) is not None
+            bot.db.close()
+    asyncio.run(go())

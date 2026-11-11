@@ -28,8 +28,8 @@ class HousekeepingCog(commands.Cog):
 
     @tasks.loop(hours=1)
     async def promotions(self) -> None:
-        """Private after N days with a valid vouch; Sergeant after enough operations."""
-        users = await self.bot.db.read(repo.users_with_rank, ("recruit", "private"))
+        """Reconcile ranks from confirmed attendance totals."""
+        users = await self.bot.db.read(repo.users_with_rank, ("recruit", "private", "sergeant"))
         for guild in self.bot.guilds:
             for row in users:
                 if guild.get_member(row["discord_id"]) is None:

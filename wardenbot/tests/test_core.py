@@ -133,18 +133,13 @@ def test_steam():
 
 
 # ----------------------------------------------------------------- ranks ----
-RULES = ranks.RankRules(7, 10)
+RULES = ranks.RankRules()
 
 
-def test_auto_rank_progression():
-    adm = NOW - timedelta(days=8)
-    assert ranks.auto_rank("recruit", adm, NOW, False, 50, RULES) == "recruit"  # no vouch
-    assert ranks.auto_rank("recruit", NOW - timedelta(days=3), NOW, True, 50, RULES) == "recruit"  # too early
-    assert ranks.auto_rank("recruit", adm, NOW, True, 3, RULES) == "private"
-    assert ranks.auto_rank("recruit", adm, NOW, True, 10, RULES) == "sergeant"
-    assert ranks.auto_rank("private", adm, NOW, True, 10, RULES) == "sergeant"
-    assert ranks.auto_rank("sergeant", adm, NOW, False, 0, RULES) == "sergeant"  # never demoted
-    assert ranks.auto_rank(None, None, NOW, True, 99, RULES) == "recruit"
+@pytest.mark.parametrize('count,expected', [(0,'recruit'),(6,'recruit'),(7,'private'),(29,'private'),(30,'sergeant'),(50,'sergeant')])
+def test_auto_rank_progression(count, expected):
+    assert ranks.auto_rank('recruit', NOW, NOW, False, count, RULES) == expected
+    assert ranks.auto_rank('sergeant', NOW, NOW, False, count, RULES) == expected
 
 
 def test_noshow_block():
@@ -191,7 +186,7 @@ def test_migration_is_idempotent(tmp_path):
     path = str(tmp_path / "x.db")
     connect(path).close()
     c = connect(path)
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 3
     c.close()
 
 
@@ -222,6 +217,8 @@ def test_finish_attendance_and_rank_inputs(conn):
         repo.signup(conn, op, uid, inf if uid < 3 else repo.op_slots(conn, op)[1]["id"], NOW)
     assert repo.mark_noshow(conn, op, 2) is True
     assert repo.mark_noshow(conn, op, 99) is False
+    assert repo.confirm_attendance(conn, op, 1, True)
+    assert repo.confirm_attendance(conn, op, 3, True)
     attendees = repo.op_finish(conn, op, NOW + timedelta(hours=3))
     assert sorted(attendees) == [1, 3]
     assert repo.op_finish(conn, op, NOW) == []  # already finished
@@ -299,3 +296,25 @@ def test_backup_tool_makes_a_readable_copy_and_prunes(tmp_path):
     assert row == ("v",)
     assert len(list((tmp_path / "b").glob("*.db"))) == 2
     db.close()
+
+
+
+def test_signup_alone_and_cancelled_operations_never_award_attendance(conn):
+    op = _make_op(conn)
+    slot = repo.op_slots(conn, op)[0]['id']
+    repo.signup(conn, op, 1, slot, NOW)
+    assert repo.op_finish(conn, op, NOW) == []
+    assert repo.attended_count(conn, 1) == 0
+    # Explicit historical correction is possible and repeatable without double credit.
+    assert repo.confirm_attendance(conn, op, 1, True)
+    assert repo.confirm_attendance(conn, op, 1, True)
+    assert repo.attended_count(conn, 1) == 1
+    assert repo.confirm_attendance(conn, op, 1, False)
+    assert repo.attended_count(conn, 1) == 0
+    cancelled = _make_op(conn)
+    slot = repo.op_slots(conn, cancelled)[0]['id']
+    repo.signup(conn, cancelled, 1, slot, NOW)
+    assert repo.confirm_attendance(conn, cancelled, 1, True)
+    assert repo.op_cancel(conn, cancelled, NOW)
+    assert not repo.confirm_attendance(conn, cancelled, 1, True)
+    assert repo.attended_count(conn, 1) == 0

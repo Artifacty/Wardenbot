@@ -42,7 +42,7 @@ class WardenBot(commands.Bot):
         )
         self.config = config
         self.db = db
-        self.rank_rules = RankRules(config.private_after_days, config.sergeant_after_ops)
+        self.rank_rules = RankRules()
         self.role_sync_locks: dict[tuple[int, int], asyncio.Lock] = {}
         self._cfg: dict[int, dict[str, str]] = {}
         self.tree.on_error = self._on_tree_error  # type: ignore[assignment]
@@ -76,12 +76,13 @@ class WardenBot(commands.Bot):
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
         scope = self.config.dev_guild_id or 0
         stored = self.cfg(0).get(f"commands_hash.{scope}")
+        guild = discord.Object(id=self.config.dev_guild_id) if self.config.dev_guild_id else None
+        if guild is not None:
+            self.tree.copy_global_to(guild=guild)
         if stored == digest:
             log.info("Slash commands unchanged; skipping sync")
             return
-        if self.config.dev_guild_id:
-            guild = discord.Object(id=self.config.dev_guild_id)
-            self.tree.copy_global_to(guild=guild)
+        if guild is not None:
             synced = await self.tree.sync(guild=guild)
         else:
             synced = await self.tree.sync()

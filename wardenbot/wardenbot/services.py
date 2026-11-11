@@ -141,7 +141,11 @@ async def report_error(bot: "WardenBot", interaction: discord.Interaction | None
     log.error("Unhandled error in %s (%s)", where, type(error).__name__)
     if interaction is not None:
         try:
-            await reply(interaction, t("err_generic", await user_language(interaction)))
+            language = await user_language(interaction)
+        except Exception:
+            language = "en"  # Error reporting must still work when storage is unavailable.
+        try:
+            await reply(interaction, t("err_generic", language))
         except discord.HTTPException:
             pass
         guild = interaction.guild
@@ -171,4 +175,5 @@ async def sync_member_roles(bot: "WardenBot", guild, user_id: int) -> bool:
                         guild.id, user_id, type(exc).__name__)
             return False
         await bot.db.write(repo.role_job_ack, guild.id, user_id, job['revision'])
-        return True
+        latest = await bot.db.read(repo.role_job_get, guild.id, user_id)
+        return latest["applied_revision"] == latest["revision"]

@@ -21,8 +21,8 @@ def at_least(rank: str | None, minimum: str) -> bool:
 
 @dataclass(frozen=True)
 class RankRules:
-    private_after_days: int = 7
-    sergeant_after_ops: int = 10
+    member_after_ops: int = 7
+    veteran_after_ops: int = 30
 
 
 def auto_rank(
@@ -33,16 +33,14 @@ def auto_rank(
     attended_ops: int,
     rules: RankRules,
 ) -> str:
-    """Return the rank the member should have. Ranks are never lowered automatically."""
+    """Rank follows explicitly confirmed completed operations; legacy inputs are ignored."""
     if current is None or admitted_at is None:
-        return current or "recruit"
-    private_ready = has_valid_vouch and now - admitted_at >= timedelta(days=rules.private_after_days)
-    target = "recruit"
-    if private_ready:
-        target = "private"
-        if attended_ops >= rules.sergeant_after_ops:
-            target = "sergeant"
-    return target if rank_index(target) > rank_index(current) else current
+        return "recruit"
+    if attended_ops >= rules.veteran_after_ops:
+        return "sergeant"  # stable database key, displayed as Veteran
+    if attended_ops >= rules.member_after_ops:
+        return "private"   # displayed as Member
+    return "recruit"       # displayed as Verified
 
 
 def noshow_block_until(

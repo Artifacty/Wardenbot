@@ -164,6 +164,10 @@ MIGRATIONS: list[str] = [
         PRIMARY KEY(guild_id, user_id)
     );
     """,
+    # v3: distinguish explicit attendance from legacy auto-counted signups.
+    """
+    ALTER TABLE op_signups ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 
