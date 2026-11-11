@@ -6,20 +6,21 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from main.Wardenbot.wardenbot.wardenbot.cogs import operations
 import pytest
 
 discord = pytest.importorskip("discord")
 
 from wardenbot import i18n, repo  # noqa: E402
-from wardenbot.bot import EXTENSIONS, WardenBot  # noqa: E402
-from wardenbot.cogs import operations, verification  # noqa: E402
-from wardenbot.config import Config  # noqa: E402
-from wardenbot.db import Database  # noqa: E402
-from wardenbot.layout import ALL_CHANNELS, CATEGORIES, ROLES, viewer_roles  # noqa: E402
-from wardenbot.opsmeta import ALL_FORUM_TAGS  # noqa: E402
-from wardenbot.perm_layout import category_overwrites, channel_overwrites  # noqa: E402
-from wardenbot.render import OpView, SlotView, SupplyView, build_card  # noqa: E402
-from wardenbot.slots import SlotSpec, SupplySpec  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.bot import EXTENSIONS, WardenBot  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.cogs import verification  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.config import Config  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.db import Database  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.layout import ALL_CHANNELS, CATEGORIES, ROLES, viewer_roles  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.opsmeta import ALL_FORUM_TAGS  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.perm_layout import category_overwrites, channel_overwrites  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.render import OpView, SlotView, SupplyView, build_card  # noqa: E402
+from main.Wardenbot.wardenbot.wardenbot.slots import SlotSpec, SupplySpec  # noqa: E402
 
 
 def run(coro):
@@ -107,7 +108,7 @@ def test_dynamic_item_templates_match_their_ids():
     for item in (operations.OpButton(12, "signup"), operations.OpButton(12, "manage"), verification.ReviewButton(7, "reject")):
         assert item.template.fullmatch(item.item.custom_id), item.item.custom_id
         assert len(item.item.custom_id) <= 100
-    from wardenbot.cogs.selfroles import RoleButton
+    from main.Wardenbot.wardenbot.wardenbot.cogs.selfroles import RoleButton
     assert RoleButton.__discord_ui_compiled_template__.fullmatch(RoleButton("ping_ops").item.custom_id)
 
 
@@ -124,7 +125,7 @@ def test_modals_respect_discord_limits(lang):
         verification.VerifyModal(lang),
         verification.ReasonModal(1, "reject", lang, None),
     ]
-    from wardenbot.cogs.priorities import PriorityModal
+    from main.Wardenbot.wardenbot.wardenbot.cogs.priorities import PriorityModal
     modals.append(PriorityModal(SimpleNamespace(bot=cog.bot), 1, lang, None))
     for modal in modals:
         assert len(modal.title) <= 45, modal.title
@@ -138,8 +139,8 @@ def test_modals_respect_discord_limits(lang):
 
 
 def test_default_slot_templates_parse_and_fit():
-    from wardenbot.opsmeta import DEFAULT_SLOTS, DEFAULT_SUPPLY
-    from wardenbot.slots import parse_slots, parse_supply
+    from main.Wardenbot.wardenbot.wardenbot.opsmeta import DEFAULT_SLOTS, DEFAULT_SUPPLY
+    from main.Wardenbot.wardenbot.wardenbot.slots import parse_slots, parse_supply
     for key, text in DEFAULT_SLOTS.items():
         assert len(text) <= 600, key
         assert parse_slots(text)
@@ -320,7 +321,7 @@ def test_review_card_flags_and_embed():
 # ---------------------------------------------------------------- invite --
 def test_invite_permissions_cover_everything_setup_writes_and_exclude_admin():
     from wardenbot import invite
-    from wardenbot.layout import ROLES
+    from main.Wardenbot.wardenbot.wardenbot.layout import ROLES
 
     needed = invite.required_permissions()
     assert not needed.administrator

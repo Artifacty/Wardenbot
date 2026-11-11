@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from . import ranks, repo
+from . import repo
+from . import ranks
 from .i18n import lang_of, t
 from .layout import RANK_ROLES, ROLE_BY_KEY
 from .timeutil import from_iso
