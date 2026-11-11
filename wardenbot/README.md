@@ -2,7 +2,9 @@
 
 Дискорд-бот для двуязычного (RU/EN) сервера Варденов в Foxhole. Он строит сервер по плану (роли, каналы, права), проводит допуск, ведёт доску операций с записью по слотам, пишет напоминания, публикует цели штаба и повышает игроков по правилам.
 
-**Статус:** ядро (v0.1). Логика, база данных и интерфейс проверены автотестами (54 теста) и сверены с исходниками discord.py 2.x. **Живого запуска против настоящего Discord ещё не было**: первый запуск на тестовом сервере (шаг 4) обязателен, и мелкие шероховатости там возможны. Перечень того, что уже есть и чего пока нет, в конце файла.
+**Статус:** ядро (v0.1). Логика, база данных и интерфейс проверены автотестами (67 тестов) и сверены с исходниками discord.py 2.x. **Живого запуска против настоящего Discord ещё не было**: первый запуск на тестовом сервере (шаг 4) обязателен, и мелкие шероховатости там возможны. Перечень того, что уже есть и чего пока нет, в конце файла.
+
+Текущий этап и оставшиеся ограничения: [план разработки](docs/DEVELOPMENT.md).
 
 ## Что умеет v0.1
 
@@ -236,4 +238,4 @@ A bilingual (RU/EN) Discord bot for a Warden-side Foxhole community server: buil
 
 Quick start: create an application in the Developer Portal, enable **Server Members Intent**, invite the bot with `python -m wardenbot.invite <APPLICATION_ID>` (no Administrator needed), enable **Community** on the server, move the bot role to the top, `cp .env.example .env`, set `DISCORD_TOKEN` (and `DEV_GUILD_ID` for testing), `pip install -r requirements.txt`, `python -m wardenbot`, then run `/setup run`. Docker and systemd files are included. Hosting options: `docs/HOSTING.md`.
 
-Status: v0.1 core, covered by 54 automated tests and checked against the discord.py 2.x source, but not yet exercised against live Discord. Run it on a test server first.
+Status: v0.1 core, covered by 67 automated tests and checked against the discord.py 2.x source, but not yet exercised against live Discord. Run it on a test server first.

@@ -128,10 +128,28 @@ def req_latest_for_user(conn: sqlite3.Connection, user_id: int) -> Row | None:
     ).fetchone()
 
 
-def req_set_screenshot(conn: sqlite3.Connection, req_id: int, url: str) -> None:
-    conn.execute(
-        "UPDATE verification_requests SET screenshot_url=?, status='pending' WHERE id=?", (url, req_id)
+def req_set_screenshot(conn: sqlite3.Connection, req_id: int, url: str) -> bool:
+    cur = conn.execute(
+        "UPDATE verification_requests SET screenshot_url=?, status='pending' "
+        "WHERE id=? AND status IN ('awaiting_screenshot','needs_info')", (url, req_id)
     )
+    return cur.rowcount == 1
+
+
+def req_attach_review(
+    conn: sqlite3.Connection, req_id: int, expected_status: str,
+    expected_message_id: int | None, filename: str, channel_id: int, message_id: int,
+) -> bool:
+    """Attach one review card only if the upload's snapshot is still current."""
+    if expected_status not in ('awaiting_screenshot', 'needs_info'):
+        return False
+    cur = conn.execute(
+        "UPDATE verification_requests SET screenshot_url=?, status='pending', "
+        "review_channel_id=?, review_message_id=? WHERE id=? AND status=? "
+        "AND review_message_id IS ?",
+        (filename, channel_id, message_id, req_id, expected_status, expected_message_id),
+    )
+    return cur.rowcount == 1
 
 
 def req_set_review_message(conn: sqlite3.Connection, req_id: int, channel_id: int, message_id: int) -> None:
@@ -145,6 +163,8 @@ def req_decide(
     conn: sqlite3.Connection, req_id: int, status: str, decided_by: int, reason: str, now: datetime
 ) -> bool:
     """Record a decision once. Returns False if the request was already decided."""
+    if status not in ('approved', 'rejected', 'needs_info'):
+        raise ValueError(f"invalid verification decision: {status}")
     cur = conn.execute(
         "UPDATE verification_requests SET status=?, decided_by=?, decided_at=?, reason=? "
         "WHERE id=? AND status IN ('pending','needs_info')",

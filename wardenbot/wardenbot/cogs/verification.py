@@ -24,6 +24,21 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 STATUS_COLOR = {"approved": 0x3E8E5A, "rejected": 0x8B3A3A, "needs_info": 0xD9A441, "pending": BLUE}
 
 
+def submission_block(user, latest, now, cooldown_hours: int) -> tuple[str, int] | None:
+    """Rechecked inside the write transaction when a previously opened form submits."""
+    if user is not None and user['status'] == 'banned':
+        return 'err_no_perm', 0
+    if user is not None and user['status'] == 'admitted':
+        return 'ver_already', 0
+    if latest is not None and latest['status'] == 'pending':
+        return 'ver_pending', 0
+    if user is not None and user['last_reject_at']:
+        until = from_iso(user['last_reject_at']) + timedelta(hours=cooldown_hours)
+        if until > now:
+            return 'ver_cooldown', max(1, int((until - now).total_seconds() // 3600) + 1)
+    return None
+
+
 def build_verify_view() -> discord.ui.View:
     return VerifyPanelView()
 
@@ -52,18 +67,10 @@ async def begin_verification(interaction: discord.Interaction) -> None:
         return repo.user_get(conn, member.id), repo.req_latest_for_user(conn, member.id)
 
     user, latest = await bot.db.read(look)
-    if user is not None and user["status"] == "admitted":
-        await reply(interaction, t("ver_already", lang))
+    block = submission_block(user, latest, now, bot.config.reject_cooldown_hours)
+    if block:
+        await reply(interaction, t(block[0], lang, hours=block[1]))
         return
-    if latest is not None and latest["status"] == "pending":
-        await reply(interaction, t("ver_pending", lang))
-        return
-    if user is not None and user["last_reject_at"]:
-        until = from_iso(user["last_reject_at"]) + timedelta(hours=bot.config.reject_cooldown_hours)
-        if until > now:
-            hours = max(1, int((until - now).total_seconds() // 3600) + 1)
-            await reply(interaction, t("ver_cooldown", lang, hours=hours))
-            return
     await interaction.response.send_modal(VerifyModal(lang))
 
 
@@ -96,6 +103,10 @@ class VerifyModal(discord.ui.Modal):
 
         def work(conn):
             user = repo.user_ensure(conn, member.id, now)
+            block = submission_block(user, repo.req_latest_for_user(conn, member.id), now,
+                                     bot.config.reject_cooldown_hours)
+            if block:
+                return block
             flags = []
             others = repo.steam_conflicts(conn, ref.key, member.id)
             if others:
@@ -104,15 +115,18 @@ class VerifyModal(discord.ui.Modal):
                 flags.append("young_account")
             if user["last_reject_at"]:
                 flags.append("previously_rejected")
-            req_id = repo.req_create(
+            repo.req_create(
                 conn, interaction.guild.id, member.id, code, ref.key, ref.url,
                 self.name.value.strip(), self.regiment.value.strip(), self.voucher.value.strip(),
                 ";".join(flags), now,
             )
             repo.user_update(conn, member.id, now, status="pending")
-            return req_id
+            return None
 
-        await bot.db.write(work)
+        block = await bot.db.write(work)
+        if block:
+            await reply(interaction, t(block[0], lang, hours=block[1]))
+            return
         await reply(interaction, t("ver_started", lang, code=code))
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
@@ -216,14 +230,18 @@ async def decide(
     bot: WardenBot = interaction.client  # type: ignore[assignment]
     lang = lang_of(interaction)
     guild = interaction.guild
-    assert guild is not None
+    if guild is None or not isinstance(interaction.user, discord.Member) or not can_screen(bot, interaction.user):
+        await reply(interaction, t("err_no_perm", lang))
+        return
     message = message or interaction.message
     now = utcnow()
 
     def work(conn):
         req = repo.req_get(conn, req_id)
-        if req is None:
+        if req is None or req['guild_id'] != guild.id:
             return None, False
+        if message is None or req['review_message_id'] != message.id:
+            return req, False
         done = repo.req_decide(conn, req_id, status, interaction.user.id, reason, now)
         if not done:
             return req, False
@@ -286,7 +304,7 @@ class VerificationCog(commands.Cog):
             return
         verify_ch = channel_mention(self.bot, guild.id, "verify")
         req = await self.bot.db.read(lambda conn: repo.req_latest_for_user(conn, member.id))
-        if req is None or req["status"] not in ("awaiting_screenshot", "needs_info"):
+        if req is None or req['guild_id'] != guild.id or req["status"] not in ("awaiting_screenshot", "needs_info"):
             await reply(interaction, t("ver_no_open", lang, verify=verify_ch))
             return
         ctype = (image.content_type or "").lower()
@@ -304,10 +322,15 @@ class VerificationCog(commands.Cog):
         message = await channel.send(embed=embed, file=file, view=review_view(req["id"]), allowed_mentions=discord.AllowedMentions.none())
 
         def work(conn):
-            repo.req_set_screenshot(conn, req["id"], file.filename)
-            repo.req_set_review_message(conn, req["id"], channel.id, message.id)
+            return repo.req_attach_review(conn, req['id'], req['status'], req['review_message_id'],
+                                          file.filename, channel.id, message.id)
 
-        await self.bot.db.write(work)
+        if not await self.bot.db.write(work):
+            # Another upload or a moderator decision won the race. Never leave
+            # an extra screenshot/card available for a second decision.
+            await message.delete()
+            await interaction.followup.send(t('ver_no_open', lang, verify=verify_ch), ephemeral=True)
+            return
         await interaction.followup.send(t("ver_sent", lang), ephemeral=True)
 
     @verify.command(name="status", description="Check your request · Статус заявки")
