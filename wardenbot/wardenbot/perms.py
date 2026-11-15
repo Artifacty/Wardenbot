@@ -49,3 +49,8 @@ def is_admitted(bot: "WardenBot", member: discord.Member) -> bool:
 
 def can_manage_op(bot: "WardenBot", member: discord.Member, organizer_id: int) -> bool:
     return member.id == organizer_id or can_staff(bot, member)
+
+
+def can_admin(bot, member: discord.Member) -> bool:
+    """Native Discord administrators and the configured bot Admin role."""
+    return is_admin(member) or has_any(bot, member, ('command',))

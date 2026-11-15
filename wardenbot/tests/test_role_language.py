@@ -37,15 +37,15 @@ def inter(bot, names=(), locale='ru'):
     ([], 'ru','admitted','ru'), (['ru'],'ru','pending','en'),
     (['ru'],'ru','rejected','en'), (['en'],'ru','admitted','en'),
 ])
-def test_roles_override_client_locale_and_have_deterministic_fallback(names,saved,status,expected):
+def test_russian_interface_ignores_legacy_roles_and_client_locale(names,saved,status,expected):
     async def go():
         bot = WardenBot(Config(token='unused'), Database(':memory:'))
         await bot.db.write(repo.user_update,10,NOW,language=saved,status=status)
         i = inter(bot,names,locale='ru' if expected == 'en' else 'en-US')
-        assert await user_language(i) == expected
+        assert await user_language(i) == 'ru'
         if status == 'admitted':
             menu = MenuView(10,await user_language(i))
-            assert menu.children[0].label == ('Создать операцию' if expected == 'ru' else 'Create operation')
+            assert menu.children[0].label == 'Создать операцию'
         bot.cfg(1)['ch.screening'] = '99'
         assert await user_language(i) == 'ru'
         bot.db.close()
@@ -60,12 +60,12 @@ def test_configured_role_id_survives_rename_and_failed_change_overrides_old_role
         bot.cfg(1)['role.lang_ru'] = '100'
         assert await user_language(i) == 'ru'
         await bot.db.write(role_jobs.enqueue,1,10,'language','en')
-        assert await user_language(i) == 'en'
+        assert await user_language(i) == 'ru'
         bot.db.close()
     asyncio.run(go())
 
 
-def test_language_choice_is_durable_before_discord_update(monkeypatch,tmp_path):
+def test_old_language_button_no_longer_changes_preferences(monkeypatch,tmp_path):
     async def go():
         path = str(tmp_path/'db')
         bot = WardenBot(Config(token='unused'),Database(path))
@@ -76,9 +76,9 @@ def test_language_choice_is_durable_before_discord_update(monkeypatch,tmp_path):
         await RoleButton('lang_ru').callback(i)
         bot.db.close()
         bot = WardenBot(Config(token='unused'),Database(path))
-        assert (await bot.db.read(repo.user_get,10))['language'] == 'ru'
+        assert (await bot.db.read(repo.user_get,10))['language'] == 'en'
         job = await bot.db.read(role_jobs.get,1,10,'language')
-        assert job['revision'] > job['applied_revision'] and job['target'] == 'ru'
+        assert job is None
         bot.db.close()
     asyncio.run(go())
 
@@ -109,7 +109,15 @@ def test_native_localization_and_preverification_exception():
             await bot.load_extension(ext)
         translator = CommandTranslator()
         menu = await bot.tree.get_command('menu').get_translated_payload(bot.tree,translator)
-        assert menu['name_localizations']['ru'] == 'меню'
+        assert not menu['name_localizations']
+        assert bot.tree.get_command('language') is None
+        assert bot.tree.get_command('setup').default_permissions is None
+        def check_names(command):
+            assert not command.get('name_localizations')
+            for child in command.get('options', []):
+                check_names(child)
+        for command in bot.tree.get_commands():
+            check_names(await command.get_translated_payload(bot.tree,translator))
         verify = await bot.tree.get_command('verify').get_translated_payload(bot.tree,translator)
         assert not verify['name_localizations']
         for opt in verify['options']:

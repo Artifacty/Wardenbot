@@ -241,7 +241,7 @@ def test_signup_flow_end_to_end_with_capacity():
         # an unverified user is turned away
         stranger = make_interaction(fake_member(10))
         await cog.on_signup(stranger, op_id)
-        assert "verification" in stranger.response.send_message.call_args.args[0].lower() or "Pass verification" in stranger.response.send_message.call_args.args[0]
+        assert "допуск" in stranger.response.send_message.call_args.args[0].lower()
 
         # a recruit gets the slot picker
         u1 = make_interaction(fake_member(11, [500]))
@@ -252,7 +252,7 @@ def test_signup_flow_end_to_end_with_capacity():
         view.select._values = [str(slots[0]["id"])]  # type: ignore[attr-defined]
         pick = make_interaction(fake_member(11, [500]))
         await view.chosen(pick)
-        assert "signed up" in pick.response.edit_message.call_args.kwargs["content"]
+        assert "записаны" in pick.response.edit_message.call_args.kwargs["content"]
 
         # the 1-seat slot is now full for the next user
         u2 = make_interaction(fake_member(12, [500]))
@@ -261,15 +261,15 @@ def test_signup_flow_end_to_end_with_capacity():
         view2.select._values = [str(slots[0]["id"])]  # type: ignore[attr-defined]
         pick2 = make_interaction(fake_member(12, [500]))
         await view2.chosen(pick2)
-        assert "full" in pick2.response.edit_message.call_args.kwargs["content"]
+        assert "заполнен" in pick2.response.edit_message.call_args.kwargs["content"]
 
         # the closed briefing: not for strangers, not before T-60, yes for the organizer
         b1 = make_interaction(fake_member(11, [500]))
         await cog.on_brief(b1, op_id)
-        assert "opens" in b1.response.send_message.call_args.args[0]
+        assert "откроется" in b1.response.send_message.call_args.args[0]
         b2 = make_interaction(fake_member(12, [500]))
         await cog.on_brief(b2, op_id)
-        assert "only for signed-up" in b2.response.send_message.call_args.args[0]
+        assert "записавшимся" in b2.response.send_message.call_args.args[0]
         b3 = make_interaction(fake_member(99, [500]))
         await cog.on_brief(b3, op_id)
         assert b3.response.send_message.call_args.kwargs["embed"].description == "secret plan"
@@ -288,7 +288,7 @@ def test_signup_flow_end_to_end_with_capacity():
         # leaving
         lv = make_interaction(fake_member(11, [500]))
         await cog.on_leave(lv, op_id)
-        assert "cancelled" in lv.response.send_message.call_args.args[0]
+        assert "отменена" in lv.response.send_message.call_args.args[0]
         for task in cog._pending.values():
             task.cancel()
 

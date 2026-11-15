@@ -1,5 +1,4 @@
-"""Interface strings. Ephemeral replies follow the user's Discord language (ru or en);
-public cards are bilingual."""
+"""Interface strings. The active community UI uses Russian."""
 
 from __future__ import annotations
 
@@ -88,14 +87,15 @@ _add("ver_already", "Вы уже прошли допуск.", "You are already v
 _add("ver_pending", "Ваша заявка уже в очереди, штаб ответит в личные сообщения. Не забудьте выполнить /verify screenshot, если ещё не отправили скриншот.",
      "Your request is already in the queue; the staff will reply by direct message. If you have not sent your screenshot yet, run /verify screenshot.")
 _add("ver_cooldown", "Повторная заявка возможна через {hours} ч.", "You can apply again in {hours} h.")
-_add("ver_modal_title", "Допуск · Verification", "Verification")
+_add("ver_modal_title", "Допуск", "Verification")
 _add("ver_f_steam", "Ссылка на профиль Steam", "Steam profile link")
 _add("ver_f_name", "Ник в игре", "In-game name")
 _add("ver_f_regiment", "Полк (если есть)", "Regiment (if any)")
 _add("ver_f_voucher", "Кто может поручиться (ник Discord)", "Who can vouch for you (Discord name)")
 _add("ver_started",
-     "Заявка создана. Теперь сделайте скриншот Foxhole, где видно, что вы играете за Варденов, и впишите на экран или в игровой чат код **{code}**. "
-     "Затем выполните команду `/verify screenshot` и приложите файл. Код действует только для этой заявки.",
+     "Заявка создана. Введите код **{code}** в игровой чат. Сделайте один скриншот, "
+     "на котором одновременно видны F1 и чат с кодом. Отправьте его через `/verify screenshot`. "
+     "Код привязан к вашей заявке; скриншот проверит модератор.",
      "Your request is created. Type **{code}** in the in-game chat. Take ONE screenshot showing "
      "both F1 and the chat containing your code. Run `/verify screenshot` and attach that image. "
      "This code is bound to you and this request; a moderator will check the screenshot.")
@@ -116,7 +116,7 @@ _add("ver_approved_dm", "Допуск одобрен. Добро пожалов�
 _add("ver_rejected_dm", "Допуск отклонён. Причина: {reason}", "Verification rejected. Reason: {reason}")
 _add("ver_info_dm", "По вашей заявке нужны уточнения: {reason}. Выполните `/verify screenshot` с новым скриншотом или напишите штабу.",
      "The staff needs more information: {reason}. Run `/verify screenshot` with a new screenshot or contact the staff.")
-_add("ver_reason_title", "Причина · Reason", "Reason")
+_add("ver_reason_title", "Причина", "Reason")
 _add("ver_reason_label", "Что написать игроку", "What to tell the player")
 _add("ver_done_ok", "Готово.", "Done.")
 
@@ -129,8 +129,8 @@ _add("mem_vouch_not_recruit", "Поручаться можно только за
 _add("mem_vouch_dup", "Вы уже ручались за этого игрока.", "You have already vouched for this player.")
 _add("mem_promoted", "Ваше звание повышено: {rank}.", "You have been promoted: {rank}.")
 _add("mem_info",
-     "{user}\nЗвание · Rank: {rank}\nСтатус · Status: {status}\nДопущен · Admitted: {admitted}\nПосещено операций · Ops attended: {ops}\n"
-     "Поручительств · Vouches: {vouches}\nSteam: {steam}\nНик · Name: {name}\nПолк · Regiment: {regiment}",
+     "{user}\nЗвание: {rank}\nСтатус: {status}\nДопущен: {admitted}\nПосещено операций: {ops}\n"
+     "Поручительств: {vouches}\nSteam: {steam}\nНик: {name}\nПолк: {regiment}",
      "{user}\nRank: {rank}\nStatus: {status}\nAdmitted: {admitted}\nOps attended: {ops}\n"
      "Vouches: {vouches}\nSteam: {steam}\nName: {name}\nRegiment: {regiment}")
 _add("mem_unknown", "Об этом игроке нет записей.", "No record of this player.")
@@ -195,7 +195,7 @@ _add("op_btn_urgent_off", "Снять «срочно»", "Clear urgent")
 _add("op_btn_supply", "Снабжение", "Supply")
 _add("op_btn_edit", "Описание", "Edit briefing")
 _add("op_started", "Операция началась.", "The operation has started.")
-_add("op_finished", "Операция завершена. Явка учтена: {n}.", "Operation finished. Attendance recorded: {n}.")
+_add("op_finished", "Операция завершена. Явка учтена: {n}. Архивирование поставлено в очередь.", "Operation finished. Attendance recorded: {n}.")
 _add("op_cancelled", "Операция отменена.", "Operation cancelled.")
 _add("op_state_bad", "Это действие сейчас недоступно.", "That action is not available right now.")
 _add("op_supply_title", "Снабжение", "Supply")
@@ -212,10 +212,10 @@ _add("op_remind_10", "Старт через 10 минут. Собираемся.
 _add("op_auto_closed", "Операция закрыта автоматически: организатор не завершил её вовремя.",
      "The operation was closed automatically: the organizer did not finish it in time.")
 _add("op_summary", "Итоги: пришли {n}.", "Summary: {n} attended.")
-_add("op_btn_signup", "Записаться · Sign up", "Sign up")
-_add("op_btn_leave", "Отменить запись · Leave", "Leave")
-_add("op_btn_brief", "Брифинг · Briefing", "Briefing")
-_add("op_btn_manage", "Управление · Manage", "Manage")
+_add("op_btn_signup", "Записаться", "Sign up")
+_add("op_btn_leave", "Отменить запись", "Leave")
+_add("op_btn_brief", "Брифинг", "Briefing")
+_add("op_btn_manage", "Управление", "Manage")
 
 # -------------------------------------------------------------- priorities --
 _add("pri_modal_title", "Цель", "Objective")
@@ -236,22 +236,5 @@ _add("role_missing", "Роль не настроена. Администрато
 
 
 async def user_language(interaction) -> str:
-    """English before admission, stored preference afterwards; staff channels are Russian."""
-    from . import repo, role_jobs
-    from .languages import member_language
-    guild = interaction.guild
-    if guild is not None:
-        cfg = interaction.client.cfg(guild.id)
-        if str(getattr(interaction, 'channel_id', None)) in {
-            cfg.get('ch.' + key) for key in ('mod', 'screening', 'audit_log', 'bot_admin', 'command_voice')
-        }:
-            return 'ru'
-    user = await interaction.client.db.read(repo.user_get, interaction.user.id)
-    if user is None or user['status'] != 'admitted':
-        return 'en'
-    if guild is None:
-        return user['language']
-    job = await interaction.client.db.read(role_jobs.get, guild.id, interaction.user.id, 'language')
-    if job is not None and job['revision'] != job['applied_revision']:
-        return job['target']
-    return member_language(cfg, interaction.user, user['language'])
+    """The current community uses Russian, regardless of legacy language roles."""
+    return 'ru'

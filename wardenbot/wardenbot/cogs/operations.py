@@ -12,7 +12,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import repo, clans
+from .. import repo, clans, archives
+from ..operation_archive import OperationArchiver
 from ..bot import WardenBot
 from ..i18n import user_language, parse_error_text, t
 from ..opsmeta import (
@@ -341,7 +342,7 @@ class ManageView(discord.ui.View):
     async def _guard(self, interaction: discord.Interaction):
         op = await self.cog.bot.db.read(repo.op_get, self.op_id)
         member = interaction.user
-        if not await self.cog.allowed_manage(interaction, op):
+        if not await self.cog.allowed_manage(interaction, op) or op["status"] not in (OPEN, RUNNING):
             await reply(interaction, t("err_no_perm", self.lang))
             return None
         return op
@@ -409,7 +410,7 @@ class SupplyModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         op = await self.cog.bot.db.read(repo.op_get, self.op_id)
-        if not await self.cog.allowed_manage(interaction, op):
+        if not await self.cog.allowed_manage(interaction, op) or op["status"] not in (OPEN, RUNNING):
             await reply(interaction, t('err_no_perm', self.lang))
             return
         try:
@@ -437,7 +438,7 @@ class BriefingModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         op = await self.cog.bot.db.read(repo.op_get, self.op_id)
-        if not await self.cog.allowed_manage(interaction, op):
+        if not await self.cog.allowed_manage(interaction, op) or op["status"] not in (OPEN, RUNNING):
             await reply(interaction, t('err_no_perm', self.lang))
             return
         await self.cog.bot.db.write(
@@ -456,6 +457,7 @@ class BriefingModal(discord.ui.Modal):
 class OperationsCog(commands.Cog):
     def __init__(self, bot: WardenBot) -> None:
         self.bot = bot
+        self.archiver = OperationArchiver(bot)
         self.drafts: dict[int, Draft] = {}
         self._pending: dict[int, asyncio.Task] = {}
 
@@ -547,7 +549,7 @@ class OperationsCog(commands.Cog):
         if op is None or op["status"] != DONE:
             return None
         self.request_refresh(op_id)
-        await self._say(op, t("op_summary", "ru", n=len(attendees)) + "\n" + t("op_summary", "en", n=len(attendees)))
+        await self._say(op, t("op_summary", "ru", n=len(attendees)))
         guild = guild or self.bot.get_guild(op["guild_id"])
         if guild is not None:
             for uid in attendees:
@@ -562,7 +564,7 @@ class OperationsCog(commands.Cog):
         op = await self.bot.db.read(repo.op_get, op_id)
         self.request_refresh(op_id)
         if op is not None:
-            await self._say(op, f"{t('op_cancelled', 'ru')}\n{t('op_cancelled', 'en')}", [s["user_id"] for s in signups][:80])
+            await self._say(op, t("op_cancelled", "ru"), [s["user_id"] for s in signups][:80])
         return True
 
     # ------------------------------------------------------------ publishing --
@@ -570,12 +572,16 @@ class OperationsCog(commands.Cog):
         if (interaction.guild is None or op is None or op['guild_id'] != interaction.guild.id
                 or not isinstance(interaction.user, discord.Member)):
             return False
+        if can_staff(self.bot, interaction.user):
+            return True
         user = await self.bot.db.read(repo.user_get, interaction.user.id)
         return bool(user and user['status'] == 'admitted' and is_admitted(self.bot, interaction.user))
 
     async def creator_clan(self, interaction):
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return None
+        if can_staff(self.bot, interaction.user):
+            return {'clan_id': None}  # staff may organize a community operation
         clan = await self.bot.db.read(clans.representative, interaction.guild.id, interaction.user.id)
         if clan is None:
             return None
@@ -646,13 +652,12 @@ class OperationsCog(commands.Cog):
     operation = app_commands.Group(name="operation", description="Operations · Операции", guild_only=True)
 
     @operation.command(name="create", description="Create an operation · Создать операцию")
-    @app_commands.describe(type="Operation type · Тип", language="Language of the operation · Язык операции")
+    @app_commands.describe(type="Operation type · Тип")
     @app_commands.choices(
-        type=[app_commands.Choice(name=label.both, value=key) for key, label in OP_TYPES.items()],
-        language=[app_commands.Choice(name=label.both, value=key) for key, label in LANGS.items()],
+        type=[app_commands.Choice(name=label.ru, value=key) for key, label in OP_TYPES.items()],
     )
     async def create(
-        self, interaction: discord.Interaction, type: app_commands.Choice[str], language: app_commands.Choice[str],
+        self, interaction: discord.Interaction, type: app_commands.Choice[str],
     ) -> None:
         lang = await user_language(interaction)
         member = interaction.user
@@ -670,7 +675,7 @@ class OperationsCog(commands.Cog):
         for uid in [u for u, d in self.drafts.items() if now - d.created > DRAFT_TTL]:
             self.drafts.pop(uid, None)
         draft = Draft(
-            guild_id=interaction.guild.id, organizer_id=member.id, type=type.value, language=language.value,
+            guild_id=interaction.guild.id, organizer_id=member.id, type=type.value, language="ru",
             tz_name=await self.user_tz(member.id), created=now, clan_id=clan["clan_id"],
         )
         self.drafts[member.id] = draft
@@ -821,6 +826,24 @@ class OperationsCog(commands.Cog):
             except Exception:  # noqa: BLE001 - one broken operation must not stop the loop
                 log.exception("tick action %s failed", action)
 
+        for op in await self.bot.db.read(archives.pending):
+            try:
+                # Do not interpret a temporary API/permission failure as a missing post.
+                guild = self.bot.get_guild(op['guild_id'])
+                if guild is None:
+                    continue
+                thread = None
+                if op['thread_id']:
+                    try:
+                        thread = guild.get_thread(op['thread_id']) or await guild.fetch_channel(op['thread_id'])
+                    except discord.NotFound:
+                        pass
+                    if thread is not None and not isinstance(thread, discord.Thread):
+                        continue
+                await self.archiver.run(op, thread)
+            except Exception:
+                log.exception('Archive failed for operation %s; source retained for retry', op['id'])
+
     @tick.before_loop
     async def _before_tick(self) -> None:
         await self.bot.wait_until_ready()
@@ -833,15 +856,15 @@ class OperationsCog(commands.Cog):
             await self.bot.db.write(lambda conn: repo.op_update(conn, op_id, **fields))
             signups = await self.bot.db.read(repo.op_signups, op_id)
             key = "op_remind_60" if action.kind == "remind60" else "op_remind_10"
-            await self._say(op, f"{t(key, 'ru')}\n{t(key, 'en')}", [s["user_id"] for s in signups][:80])
+            await self._say(op, t(key, "ru"), [s["user_id"] for s in signups][:80])
         elif action.kind == "start":
             if await self.bot.db.write(self.set_status_if, op_id, OPEN, RUNNING):
                 self.request_refresh(op_id)
-                await self._say(op, f"{t('op_started', 'ru')}\n{t('op_started', 'en')}")
+                await self._say(op, t("op_started", "ru"))
         elif action.kind == "autoclose":
             if await self.bot.db.write(repo.op_close_unconfirmed, op_id, utcnow()):
                 self.request_refresh(op_id)
-                await self._say(op, f"{t('op_auto_closed', 'ru')}\n{t('op_auto_closed', 'en')}")
+                await self._say(op, t("op_auto_closed", "ru"))
 
 
 async def setup(bot: WardenBot) -> None:

@@ -192,6 +192,15 @@ MIGRATIONS: list[str] = [
     CREATE UNIQUE INDEX one_clan_leader ON clan_members(clan_id) WHERE duty='leader';
     ALTER TABLE operations ADD COLUMN clan_id INTEGER REFERENCES clans(id);
     """,
+    # v6: archive receipts survive restarts; delete the source only after delivery.
+    """
+    UPDATE aux_role_jobs SET applied_revision=revision WHERE scope='language';
+    CREATE TABLE operation_archives (
+        op_id INTEGER PRIMARY KEY REFERENCES operations(id),
+        channel_id INTEGER NOT NULL, payload TEXT NOT NULL,
+        message_id INTEGER, source_deleted INTEGER NOT NULL DEFAULT 0
+    );
+    """,
 ]
 
 

@@ -19,9 +19,8 @@ SLOTS = 5
 
 
 def priority_embed(row) -> discord.Embed:
-    embed = discord.Embed(title=f"{row['slot']}. {row['title_ru']} · {row['title_en']}"[:256], color=BLUE)
-    embed.add_field(name="RU", value=row["body_ru"][:1024] or "—", inline=False)
-    embed.add_field(name="EN", value=row["body_en"][:1024] or "—", inline=False)
+    embed = discord.Embed(title=f"{row['slot']}. {row['title_ru']}"[:256], color=BLUE)
+    embed.add_field(name="Описание", value=row["body_ru"][:1024] or "—", inline=False)
     embed.set_footer(text=f"{row['updated_at']} UTC")
     return embed
 
@@ -33,15 +32,15 @@ class PriorityModal(discord.ui.Modal):
         para = discord.TextStyle.paragraph
         g = (lambda k: row[k] if row is not None else None)
         self.title_ru = discord.ui.TextInput(label=t("pri_f_title_ru", lang), default=g("title_ru"), max_length=80)
-        self.title_en = discord.ui.TextInput(label=t("pri_f_title_en", lang), default=g("title_en"), max_length=80)
         self.body_ru = discord.ui.TextInput(label=t("pri_f_body_ru", lang), default=g("body_ru"), style=para, max_length=900)
-        self.body_en = discord.ui.TextInput(label=t("pri_f_body_en", lang), default=g("body_en"), style=para, max_length=900)
-        for item in (self.title_ru, self.title_en, self.body_ru, self.body_en):
+        for item in (self.title_ru, self.body_ru):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         guild = interaction.guild
-        assert guild is not None
+        if guild is None or not isinstance(interaction.user, discord.Member) or not can_staff(self.cog.bot, interaction.user):
+            await reply(interaction, t('err_no_perm', self.lang))
+            return
         channel = get_text_channel(self.cog.bot, guild, "objectives")
         if not isinstance(channel, discord.TextChannel):
             await reply(interaction, t("pri_no_channel", self.lang))
@@ -50,8 +49,8 @@ class PriorityModal(discord.ui.Modal):
         bot = self.cog.bot
         now = utcnow()
         await bot.db.write(
-            repo.priority_set, guild.id, self.slot, self.title_ru.value.strip(), self.title_en.value.strip(),
-            self.body_ru.value.strip(), self.body_en.value.strip(), interaction.user.id, now,
+            repo.priority_set, guild.id, self.slot, self.title_ru.value.strip(), "",
+            self.body_ru.value.strip(), "", interaction.user.id, now,
         )
         row = await bot.db.read(repo.priority_get, guild.id, self.slot)
         embed = priority_embed(row)

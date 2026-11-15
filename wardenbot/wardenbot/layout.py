@@ -50,7 +50,7 @@ ROLES: tuple[RoleDef, ...] = (
 )
 # Retained only when already present; new setups use the nine access/management roles
 # plus the two existing opt-in notification roles. Language is a database preference.
-LEGACY_ROLE_KEYS = frozenset({"counterintel", "ops_officer", "ally"})
+LEGACY_ROLE_KEYS = frozenset({"counterintel", "ops_officer", "ally", "lang_ru", "lang_en"})
 ROLE_BY_KEY = {r.key: r for r in ROLES}
 
 
@@ -174,6 +174,8 @@ CATEGORIES: tuple[CategoryDef, ...] = (
             "One post is one operation. Create them with /operation create.", "recruit", "forum_bot",
             forum_tags=tuple(ALL_FORUM_TAGS),
             guidelines="Записывайтесь кнопкой под карточкой. Sign up with the button under the card."),
+        _ch("ops_archive", "text", "⬢", "архив-операций", "ops-archive", "🗄️",
+            "Итоги завершённых и отменённых операций.", "Completed and cancelled operations.", "recruit", "ro"),
         _ch("supply", "forum", "▤", "снабжение", "supply", "📦",
             "Запросы на снабжение по операциям.", "Supply requests for operations.", "recruit", "forum_open", launch=False),
         _ch("lfg", "text", "⬡", "ищу-группу", "lfg", "🔎",

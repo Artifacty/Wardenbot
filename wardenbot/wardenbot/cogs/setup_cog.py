@@ -16,7 +16,7 @@ from ..invite import role_permissions
 from ..layout import CATEGORIES, ROLES, LEGACY_ROLE_KEYS, CategoryDef, ChannelDef, role_display_name
 from ..invite import required_permission_names
 from ..perm_layout import category_overwrites, channel_overwrites
-from ..perms import is_admin
+from ..perms import can_admin
 from ..services import BLUE, audit, get_text_channel, reply
 
 log = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class SetupCog(commands.Cog):
 
     setup = app_commands.Group(
         name="setup", description="Set up the server · Настройка сервера",
-        default_permissions=discord.Permissions(administrator=True), guild_only=True,
+        guild_only=True,
     )
 
     # --------------------------------------------------------------- roles --
@@ -233,6 +233,20 @@ class SetupCog(commands.Cog):
         await self.bot.set_cfg(guild.id, f"msg.{cfg_key}", msg.id)
         return msg
 
+    async def remove_panel(self, guild, key, channel):
+        """Remove only our recorded panel; never purge other channel messages."""
+        stored = self.bot.cfg(guild.id).get(f'msg.{key}')
+        if not stored or not stored.isdigit() or not isinstance(channel, discord.TextChannel):
+            return
+        try:
+            message = await channel.fetch_message(int(stored))
+            if message.author.id != self.bot.user.id:
+                return
+            await message.delete()
+        except discord.NotFound:
+            pass
+        await self.bot.set_cfg(guild.id, f'msg.{key}', '')
+
     async def post_panels(self, guild: discord.Guild) -> list[str]:
         from .verification import build_verify_view
 
@@ -241,31 +255,18 @@ class SetupCog(commands.Cog):
         start = get_text_channel(self.bot, guild, "start")
         verify = get_text_channel(self.bot, guild, "verify")
         if isinstance(rules, discord.TextChannel):
-            en = [discord.Embed(description=read_text(f"rules_en_{i}.md"), color=BLUE) for i in (1, 2)]
-            en[0].title = "Rules"
-            await self._upsert(guild, "rules_en", rules, embeds=en)
-            # Reuse the old Russian panel ID instead of deleting a message or
-            # leaving pre-verification instructions in the wrong language.
-            if self.bot.cfg(guild.id).get("msg.rules_ru"):
-                await self._upsert(guild, "rules_ru", rules, embeds=[discord.Embed(
-                    title="Verification", description="Read the rules above, then use Verify to apply.", color=BLUE)])
+            ru = [discord.Embed(description=read_text(f"rules_ru_{i}.md"), color=BLUE) for i in (1, 2)]
+            ru[0].title = "Правила"
+            await self._upsert(guild, "rules_ru", rules, embeds=ru)
+            await self.remove_panel(guild, 'rules_en', rules)
             notes.append("rules")
-        if isinstance(start, discord.TextChannel):
-            embed = discord.Embed(
-                title="Welcome",
-                description="A community for Warden players. Read the rules, then use Verify to apply. "
-                            "Choose Russian or English in the verification form.",
-                color=BLUE,
-            )
-            await self._upsert(guild, "start", start, embeds=[embed], view=build_verify_view())
-            notes.append("start")
+        await self.remove_panel(guild, 'start', start)
         if isinstance(verify, discord.TextChannel):
             embed = discord.Embed(
-                title="Verification",
-                description="Enter your in-game name, optional clan and preferred language. "
-                            "Type your one-time code in the in-game chat. Upload ONE screenshot "
-                            "showing both F1 and the chat with your code using /verify screenshot. "
-                            "A moderator will review your request.",
+                title="Проверка участника",
+                description="Укажите имя в игре и клан, если он есть. Введите одноразовый код в игровой чат. "
+                            "Отправьте через /verify screenshot один скриншот, на котором видны F1 и чат с кодом. "
+                            "Модератор рассмотрит заявку.",
                 color=BLUE,
             )
             await self._upsert(guild, "verify", verify, embeds=[embed], view=build_verify_view())
@@ -285,7 +286,7 @@ class SetupCog(commands.Cog):
     ) -> None:
         lang = "ru"
         guild = interaction.guild
-        if guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
+        if guild is None or not isinstance(interaction.user, discord.Member) or not can_admin(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
         missing = [p for p in required_permission_names() if not getattr(guild.me.guild_permissions, p)]
@@ -317,11 +318,6 @@ class SetupCog(commands.Cog):
                     target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
                         'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
                     repo.role_job_set(conn, guild.id, member.id, target)
-                    if user and user['status'] == 'admitted':
-                        from ..languages import member_language
-                        language = member_language(self.bot.cfg(guild.id), member, user['language'])
-                        repo.user_update(conn, member.id, discord.utils.utcnow(), language=language)
-                        role_jobs.enqueue(conn, guild.id, member.id, 'language', language)
             await self.bot.db.write(queue_roles)
             notes = await self.post_panels(guild)
             lines.append("Панели: " + ", ".join(notes))
@@ -332,10 +328,10 @@ class SetupCog(commands.Cog):
         body = "\n".join(f"• {line}" for line in lines[:40]) or "—"
         await interaction.followup.send(f"{t('setup_done', lang)}\n{body}"[:1900], ephemeral=True)
 
-    @setup.command(name="panels", description="Re-post rules, start and verification messages · Обновить сообщения")
+    @setup.command(name="panels", description="Refresh rules and verification; remove the old start panel · Обновить панели")
     async def setup_panels(self, interaction: discord.Interaction) -> None:
         lang = "ru"
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member) or not can_admin(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
         await interaction.response.defer(ephemeral=True)
@@ -346,7 +342,7 @@ class SetupCog(commands.Cog):
     async def setup_status(self, interaction: discord.Interaction) -> None:
         lang = "ru"
         guild = interaction.guild
-        if guild is None or not isinstance(interaction.user, discord.Member) or not is_admin(interaction.user):
+        if guild is None or not isinstance(interaction.user, discord.Member) or not can_admin(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
         cfg = self.bot.cfg(guild.id)

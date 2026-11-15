@@ -75,8 +75,6 @@ class HousekeepingCog(commands.Cog):
             target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
                 'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
             repo.role_job_set(conn, member.guild.id, member.id, target)
-            if user and user['status'] == 'admitted':
-                role_jobs.enqueue(conn, member.guild.id, member.id, 'language', user['language'])
         await self.bot.db.write(queue)
         await sync_member_roles(self.bot, member.guild, member.id)
         age = (discord.utils.utcnow() - member.created_at).days

@@ -115,7 +115,6 @@ def test_previously_opened_modal_cannot_bypass_current_state(status):
             rid = await db.write(request)
             await db.write(repo.req_set_screenshot, rid, 'a.png')
         modal = verification.VerifyModal('en')
-        modal.language._values = ['en']
         modal.steam._value = '76561198000000000'
         modal.name._value = 'Player'
         await modal.on_submit(i)

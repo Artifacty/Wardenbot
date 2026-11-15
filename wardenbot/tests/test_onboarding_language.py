@@ -51,35 +51,29 @@ def test_required_languages_and_access_layout():
         assert not re.search('[a-zA-Z]', CHANNEL_BY_KEY[key].name())
 
 
-def test_verification_form_always_english_and_requires_language():
+def test_verification_form_is_russian_without_language_choice():
     async def go():
         form = verification.VerifyModal('ru')
-        assert form.title == 'Verification'
-        assert all(not re.search('[А-Яа-яЁё]', label.text) for label in form.children)
-        assert form.language.required and form.language.min_values == 1
-        assert [(o.label, o.value) for o in form.language.options] == [('Russian','ru'),('English','en')]
-        assert form.language.values == []
+        assert form.title == 'Допуск'
+        assert not hasattr(form, 'language')
+        assert any('Имя' in label.text for label in form.children)
         bot = WardenBot(Config(token='unused'), storage.Database(':memory:'))
         i = interaction(bot)
         i.user.id = 10
         form.name._value = 'Player'
         await form.on_submit(i)
-        assert await bot.db.read(repo.req_latest_for_user, 10) is None
-        assert i.followup.send.call_args.args[0] == 'Choose Russian or English.'
-        form.language._values = ['ru']
-        await form.on_submit(i)
         req = await bot.db.read(repo.req_latest_for_user, 10)
         assert req['language'] == 'ru' and req['steam_key'] == ''
         text = i.followup.send.call_args.args[0]
-        assert 'ONE screenshot' in text and 'F1' in text and req['code'] in text
-        assert await user_language(i) == 'en'
+        assert 'скриншот' in text and 'F1' in text and req['code'] in text
+        assert await user_language(i) == 'ru'
         await bot.db.write(repo.user_update, 10, NOW, status='admitted')
         assert await user_language(i) == 'ru'
         bot.db.close()
     asyncio.run(go())
 
 
-@pytest.mark.parametrize('decision, expected', [('approved','Допуск одобрен'), ('rejected','Verification rejected')])
+@pytest.mark.parametrize('decision, expected', [('approved','Допуск одобрен'), ('rejected','Допуск отклонён')])
 def test_decision_language_and_durable_role_job(monkeypatch, decision, expected):
     async def go():
         bot = WardenBot(Config(token='unused'), storage.Database(':memory:'))

@@ -35,6 +35,7 @@ EXTENSIONS = (
 class WardenBot(commands.Bot):
     def __init__(self, config: Config, db: Database) -> None:
         intents = discord.Intents.default()
+        intents.message_content = config.message_content_intent
         intents.members = True  # privileged: enable "Server Members Intent" in the Developer Portal
         super().__init__(
             command_prefix=commands.when_mentioned,

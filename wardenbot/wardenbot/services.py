@@ -122,8 +122,7 @@ async def evaluate_member(bot: "WardenBot", guild: discord.Guild, user_id: int, 
     await sync_member_roles(bot, guild, user_id)
     label = ROLE_BY_KEY[new_rank]
     await audit(bot, guild, None, "Повышение роли", f"<@{user_id}>", label.name)
-    user = await bot.db.read(repo.user_get, user_id)
-    await safe_dm(member, t("mem_promoted", user["language"], rank=label.en))
+    await safe_dm(member, t("mem_promoted", "ru", rank=label.en))
     return new_rank
 
 
@@ -143,7 +142,7 @@ async def report_error(bot: "WardenBot", interaction: discord.Interaction | None
         try:
             language = await user_language(interaction)
         except Exception:
-            language = "en"  # Error reporting must still work when storage is unavailable.
+            language = "ru"  # Error reporting must still work when storage is unavailable.
         try:
             await reply(interaction, t("err_generic", language))
         except discord.HTTPException:

@@ -49,14 +49,14 @@ class VerifyPanelView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Verify", style=discord.ButtonStyle.primary, custom_id="wb:verify:start")
+    @discord.ui.button(label="Пройти проверку", style=discord.ButtonStyle.primary, custom_id="wb:verify:start")
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await begin_verification(interaction)
 
 
 async def begin_verification(interaction: discord.Interaction) -> None:
     bot: WardenBot = interaction.client  # type: ignore[assignment]
-    lang = "en"
+    lang = "ru"
     member = interaction.user
     if interaction.guild is None or not isinstance(member, discord.Member):
         await reply(interaction, t("err_guild_only", lang))
@@ -76,21 +76,15 @@ async def begin_verification(interaction: discord.Interaction) -> None:
 
 class VerifyModal(discord.ui.Modal):
     def __init__(self, lang: str) -> None:
-        lang = "en"
+        lang = "ru"
         super().__init__(title=t("ver_modal_title", lang), timeout=900)
         self.lang = lang
         self.steam = discord.ui.TextInput(label=t("ver_f_steam", lang), placeholder="https://steamcommunity.com/profiles/7656…", required=False, max_length=200)
         self.name = discord.ui.TextInput(label=t("ver_f_name", lang), max_length=40)
         self.regiment = discord.ui.TextInput(label=t("ver_f_regiment", lang), required=False, max_length=40)
-        self.language = discord.ui.Select(
-            placeholder="Choose Russian or English", min_values=1, max_values=1, required=True,
-            options=[discord.SelectOption(label="Russian", value="ru"),
-                     discord.SelectOption(label="English", value="en")],
-        )
-        for label, item in (("In-game name", self.name), ("Clan (optional)", self.regiment),
-                            ("Steam profile (optional)", self.steam)):
+        for label, item in (("Имя в игре", self.name), ("Клан (необязательно)", self.regiment),
+                            ("Steam (необязательно)", self.steam)):
             self.add_item(discord.ui.Label(text=label, component=item))
-        self.add_item(discord.ui.Label(text="Language after verification", component=self.language))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         bot: WardenBot = interaction.client  # type: ignore[assignment]
@@ -104,12 +98,9 @@ class VerifyModal(discord.ui.Modal):
         except ParseError as exc:
             await reply(interaction, parse_error_text(exc, lang))
             return
-        if self.language.values not in (["ru"], ["en"]):
-            await reply(interaction, "Choose Russian or English.")
-            return
-        language = self.language.values[0]
+        language = 'ru'
         if not self.name.value.strip():
-            await reply(interaction, "Enter your in-game name.")
+            await reply(interaction, "Введите имя в игре.")
             return
         now = utcnow()
         code = generate_code()
@@ -273,7 +264,6 @@ async def decide(
                 admitted_by=interaction.user.id, steam_key=req["steam_key"], steam_url=req["steam_url"],
                 ingame_name=req["ingame_name"], regiment=req["regiment"], language=req["language"],
             )
-            role_jobs.enqueue(conn, guild.id, uid, 'language', req['language'])
         elif status == "rejected":
             repo.user_update(conn, uid, now, status="rejected", last_reject_at=to_iso(now))
         if status in ("approved", "rejected"):
@@ -291,7 +281,7 @@ async def decide(
         roles_ready = await sync_member_roles(bot, guild, uid)
     if member is not None:
         key = {"approved": "ver_approved_dm", "rejected": "ver_rejected_dm", "needs_info": "ver_info_dm"}[status]
-        text = t(key, req["language"] if status == "approved" else "en", reason=reason)
+        text = t(key, "ru", reason=reason)
         await safe_dm(member, text)
     # Update the card: drop the buttons and the screenshot.
     if message is not None:
@@ -319,7 +309,7 @@ class VerificationCog(commands.Cog):
     @verify.command(name="screenshot", description="Send ONE screenshot showing F1 and the in-game chat with your code")
     @app_commands.describe(image="One screenshot: F1 and in-game chat with your code")
     async def screenshot(self, interaction: discord.Interaction, image: discord.Attachment) -> None:
-        lang = "en"
+        lang = "ru"
         member = interaction.user
         guild = interaction.guild
         if guild is None or not isinstance(member, discord.Member):
@@ -358,7 +348,7 @@ class VerificationCog(commands.Cog):
 
     @verify.command(name="status", description="Check your verification request")
     async def status(self, interaction: discord.Interaction) -> None:
-        lang = "en"
+        lang = "ru"
         req = await self.bot.db.read(lambda conn: repo.req_latest_for_user(conn, interaction.user.id))
         if req is None:
             await reply(interaction, t("ver_status_none", lang))

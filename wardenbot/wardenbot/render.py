@@ -92,9 +92,9 @@ def thread_title(region: str, title: str) -> str:
 def format_duration(minutes: int) -> str:
     hours, rest = divmod(minutes, 60)
     if rest == 0:
-        return f"~{hours} ч · h"
+        return f"~{hours} ч"
     if hours == 0:
-        return f"~{rest} мин · min"
+        return f"~{rest} мин"
     return f"~{hours} ч {rest} мин · {hours} h {rest} min"
 
 
@@ -106,7 +106,7 @@ def _slots_fields(slots: list[SlotView]) -> list[CardField]:
     lines: list[str] = []
     for s in slots:
         count = len(s.members)
-        full = " · полно · full" if count >= s.capacity else ""
+        full = " · полно" if count >= s.capacity else ""
         head = f"**{s.name}** {count}/{s.capacity}{full}"
         if s.members:
             names = " ".join(f"<@{uid}>" for uid in s.members)
@@ -135,7 +135,7 @@ def _slots_fields(slots: list[SlotView]) -> list[CardField]:
     if chunk:
         fields.append(CardField("", "\n\n".join(chunk)))
     for i, f in enumerate(fields):
-        f.name = "Слоты · Slots" if i == 0 else f"Слоты · Slots ({i + 1})"
+        f.name = "Слоты" if i == 0 else f"Слоты({i + 1})"
     return fields
 
 
@@ -146,7 +146,7 @@ def _supply_field(items: list[SupplyView]) -> CardField | None:
     for it in items:
         pct = int(min(100, it.collected * 100 // it.needed)) if it.needed else 0
         lines.append(f"{it.name}: {it.collected}/{it.needed} {progress_bar(it.collected, it.needed)} {pct}%")
-    return CardField("Снабжение · Supply", clip("\n".join(lines), FIELD_VALUE_MAX))
+    return CardField("Снабжение", clip("\n".join(lines), FIELD_VALUE_MAX))
 
 
 def build_card(op: OpView) -> Card:
@@ -159,15 +159,15 @@ def build_card(op: OpView) -> Card:
     type_label = OP_TYPES.get(op.type)
     lang_label = LANGS.get(op.language)
     fields = [
-        CardField("Старт · Start", f"<t:{_unix(op.start_at)}:F>\n<t:{_unix(op.start_at)}:R>", True),
-        CardField("Длительность · Duration", f"{format_duration(op.duration_min)}\n→ <t:{_unix(end)}:t>", True),
-        CardField("Регион · Region", clip(op.region or "—", 100), True),
-        CardField("Тип · Type", type_label.both if type_label else op.type, True),
-        CardField("Язык · Language", lang_label.both if lang_label else op.language, True),
-        CardField("Организатор · Organizer", f"<@{op.organizer_id}>", True),
+        CardField("Старт", f"<t:{_unix(op.start_at)}:F>\n<t:{_unix(op.start_at)}:R>", True),
+        CardField("Длительность", f"{format_duration(op.duration_min)}\n→ <t:{_unix(end)}:t>", True),
+        CardField("Регион", clip(op.region or "—", 100), True),
+        CardField("Тип", type_label.ru if type_label else op.type, True),
+        CardField("Язык", lang_label.ru if lang_label else op.language, True),
+        CardField("Организатор", f"<@{op.organizer_id}>", True),
     ]
     if op.requirements.strip():
-        fields.append(CardField("Требования · Requirements", clip(op.requirements, FIELD_VALUE_MAX)))
+        fields.append(CardField("Требования", clip(op.requirements, FIELD_VALUE_MAX)))
     fields.extend(_slots_fields(op.slots))
     supply = _supply_field(op.supply)
     if supply:
@@ -175,9 +175,9 @@ def build_card(op: OpView) -> Card:
 
     description = clip(op.briefing_public, DESCRIPTION_MAX) if op.briefing_public.strip() else ""
     if op.status == CANCELLED:
-        description = "**Операция отменена · Operation cancelled**\n" + description
+        description = "**Операция отменена**\n" + description
     elif op.status == DONE:
-        description = "**Операция завершена · Operation finished**\n" + description
+        description = "**Операция завершена**\n" + description
 
     # Keep the whole embed under Discord's limit by trimming the long fields first.
     def total() -> int:
@@ -192,6 +192,6 @@ def build_card(op: OpView) -> Card:
         description = clip(description, max(0, DESCRIPTION_MAX - (total() - EMBED_TOTAL_MAX)))
 
     label = STATUS_LABEL.get(op.status)
-    footer = f"ID {op.id} · {label.both if label else op.status}"
+    footer = f"ID {op.id} · {label.ru if label else op.status}"
     color = STATUS_COLOR.get(op.status, STATUS_COLOR[OPEN])
     return Card(title=title, description=description, color=color, fields=fields[:25], footer=footer)

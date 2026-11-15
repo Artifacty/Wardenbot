@@ -37,6 +37,7 @@ class Config:
     dev_guild_id: int | None = None
     channel_name_style: str = "full"  # full | ru | en
     log_level: str = "INFO"
+    message_content_intent: bool = False  # required only to archive participant discussion
     # Rank rules (starting values from the project plan).
     private_after_days: int = 7
     sergeant_after_ops: int = 10
@@ -79,6 +80,7 @@ def load_config(env: Mapping[str, str] | None = None, env_file: str | Path = ".e
     dev_guild = merged.get("DEV_GUILD_ID", "").strip()
     return Config(
         token=token,
+        message_content_intent=merged.get("MESSAGE_CONTENT_INTENT", "false").strip().lower() in {"1", "true", "yes"},
         db_path=merged.get("DB_PATH", "data/wardenbot.db").strip() or "data/wardenbot.db",
         default_tz=merged.get("DEFAULT_TZ", "Europe/Moscow").strip() or "Europe/Moscow",
         dev_guild_id=int(dev_guild) if dev_guild.isdigit() else None,
