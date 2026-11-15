@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .. import repo
+from .. import repo, role_jobs
 from ..bot import WardenBot
 from ..i18n import user_language, t
 from ..invite import role_permissions
@@ -53,9 +53,14 @@ class SetupCog(commands.Cog):
                 role = discord.utils.get(guild.roles, name=name)
             if role is None:
                 legacy_en = {'command': 'Command', 'staff': 'Staff', 'regiment_co': 'Regiment CO',
+                             'lang_ru': 'Language: Russian', 'lang_en': 'Language: English',
                              'sergeant': 'Sergeant', 'private': 'Private', 'recruit': 'Recruit'}.get(rd.key, rd.en)
                 legacy_name = f"{rd.symbol} {rd.ru} · {legacy_en}".strip()
                 role = discord.utils.get(guild.roles, name=legacy_name)
+            if role is None and rd.key in ('lang_ru', 'lang_en'):
+                from ..languages import ROLE_NAMES
+                language = 'ru' if rd.key == 'lang_ru' else 'en'
+                role = next((r for r in guild.roles if r.name.casefold() in ROLE_NAMES[language]), None)
             if role is None and rd.key in LEGACY_ROLE_KEYS:
                 continue
             perms = role_permissions(rd)
@@ -312,6 +317,11 @@ class SetupCog(commands.Cog):
                     target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
                         'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
                     repo.role_job_set(conn, guild.id, member.id, target)
+                    if user and user['status'] == 'admitted':
+                        from ..languages import member_language
+                        language = member_language(self.bot.cfg(guild.id), member, user['language'])
+                        repo.user_update(conn, member.id, discord.utils.utcnow(), language=language)
+                        role_jobs.enqueue(conn, guild.id, member.id, 'language', language)
             await self.bot.db.write(queue_roles)
             notes = await self.post_panels(guild)
             lines.append("Панели: " + ", ".join(notes))

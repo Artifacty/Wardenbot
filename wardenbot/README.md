@@ -257,3 +257,30 @@ A bilingual (RU/EN) Discord bot for a Warden-side Foxhole community server: buil
 Quick start: create an application in the Developer Portal, enable **Server Members Intent**, invite the bot with `python -m wardenbot.invite <APPLICATION_ID>` (no Administrator needed), enable **Community** on the server, move the bot role to the top, `cp .env.example .env`, set `DISCORD_TOKEN` (and `DEV_GUILD_ID` for testing), `pip install -r requirements.txt`, `python -m wardenbot`, then run `/setup run`. Docker and systemd files are included. Hosting options: `docs/HOSTING.md`.
 
 Status: v0.1 core, covered by 83 automated tests and checked against the discord.py 2.x source, but not yet exercised against live Discord. Run it on a test server first.
+
+
+## Язык участника и кланы
+
+После обновления выполните `/setup run`: бот создаст роли `ru` и `engl` или использует
+существующие языковые роли по сохранённым ID. Роль бота должна находиться выше этих ролей.
+Проверенные участники выбирают язык через `/language`; выбор снимает противоположную роль.
+Если Discord временно недоступен, задание сохраняется в SQLite и повторяется после перезапуска.
+
+Откройте `/menu`: персональные кнопки, формы создания и ответы будут на языке роли
+`ru` или `engl`, независимо от языка Discord. Если ролей две или нет ни одной,
+используется сохранённый язык (по умолчанию EN). Вход до проверки остаётся EN,
+служебные каналы — RU. Общая карточка операции сохраняет двуязычные кнопки.
+**Сам список slash-команд Discord переводит по языку клиента, а не по роли.**
+В русском клиенте `/menu` отображается как `/меню`; персональное меню решает различие языков роли и клиента.
+
+Для создания операций нужна привязка к клану:
+
+1. Модератор выполняет `/clan register name:Название` и получает номер клана.
+2. Модератор назначает проверенного главу: `/clan assign clan:НОМЕР player:@Игрок duty:leader`.
+3. Глава назначает проверенных делегатов своего клана той же командой с `duty:delegate`.
+4. Глава или делегат создаёт операцию через `/menu` либо `/operation create`.
+5. Автор, глава этого клана и модераторы управляют операцией. Другие делегаты — только своими.
+6. `/clan remove player:@Игрок` отзывает полномочия сразу в БД; Discord-роль синхронизируется отдельно.
+
+Существующие операции без клана остаются доступны своему проверенному автору и модераторам.
+Перед обновлением сохраните резервную копию SQLite. Миграции выполняются при запуске.

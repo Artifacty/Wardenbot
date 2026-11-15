@@ -6,13 +6,14 @@ import logging
 import re
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
-from .. import repo
+from .. import repo, role_jobs
 from ..bot import WardenBot
 from ..i18n import user_language, t
 from ..layout import ROLE_BY_KEY
-from ..services import get_role, report_error, reply, utcnow
+from ..services import get_role, report_error, reply, utcnow, sync_aux_roles
 
 log = logging.getLogger(__name__)
 SELF_ROLES = ("lang_ru", "lang_en", "ping_ops", "ping_logi")
@@ -47,8 +48,16 @@ class RoleButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:role:(
             return
         if self.key in ('lang_ru', 'lang_en'):
             language = 'ru' if self.key == 'lang_ru' else 'en'
-            await bot.db.write(repo.user_update, member.id, utcnow(), language=language)
-            await reply(interaction, "Язык: русский." if language == 'ru' else "Language: English.")
+            await interaction.response.defer(ephemeral=True)
+            def save(conn):
+                repo.user_update(conn, member.id, utcnow(), language=language)
+                role_jobs.enqueue(conn, interaction.guild.id, member.id, 'language', language)
+            await bot.db.write(save)
+            synced = await sync_aux_roles(bot, interaction.guild, member.id, 'language')
+            text = "Язык: русский." if language == 'ru' else "Language: English."
+            if not synced:
+                text += " Роль будет обновлена автоматически." if language == 'ru' else " The role update will be retried automatically."
+            await reply(interaction, text)
             return
         role = get_role(bot, interaction.guild, self.key)
         if role is None:
@@ -73,9 +82,25 @@ def build_roles_view() -> discord.ui.View:
     return view
 
 
+class LanguageView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        self.add_item(RoleButton('lang_ru'))
+        self.add_item(RoleButton('lang_en'))
+
+
 class SelfRolesCog(commands.Cog):
     def __init__(self, bot: WardenBot) -> None:
         self.bot = bot
+
+    @app_commands.command(name='language', description='Choose your language role')
+    @app_commands.guild_only()
+    async def language(self, interaction):
+        user = await self.bot.db.read(repo.user_get, interaction.user.id)
+        if not user or user['status'] != 'admitted':
+            await reply(interaction, "Complete verification first.")
+            return
+        await reply(interaction, "Russian / English", view=LanguageView())
 
     async def cog_load(self) -> None:
         self.bot.add_dynamic_items(RoleButton)

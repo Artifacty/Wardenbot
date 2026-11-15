@@ -146,13 +146,13 @@ _add("help_text",
 # -------------------------------------------------------------- operations --
 _add("op_no_forum", "Канал доски операций не настроен. Администратор должен выполнить /setup run.",
      "The operations board channel is not configured. An administrator must run /setup run.")
-_add("op_modal_title", "Операция · Operation", "Operation")
+_add("op_modal_title", "Операция", "Operation")
 _add("op_f_title", "Название", "Title")
 _add("op_f_region", "Регион", "Region")
 _add("op_f_start", "Старт (ваш часовой пояс)", "Start (your time zone)")
 _add("op_f_duration", "Длительность, часов", "Duration, hours")
 _add("op_f_requirements", "Требования (микрофон, опыт, техника)", "Requirements (mic, experience, vehicles)")
-_add("op_modal2_title", "Детали операции · Details", "Operation details")
+_add("op_modal2_title", "Детали операции", "Operation details")
 _add("op_f_public", "Описание для всех (без точных деталей)", "Public briefing (no exact details)")
 _add("op_f_closed", "Закрытый брифинг (откроется записавшимся)", "Closed briefing (opens to sign-ups)")
 _add("op_f_slots", "Слоты: Название число, через запятую", "Slots: Name number, comma separated")
@@ -163,9 +163,9 @@ _add("op_draft_basic",
 _add("op_draft_ready", "Предпросмотр ниже. Если всё верно, нажмите «Опубликовать».",
      "Preview below. If everything is right, press Publish.")
 _add("op_draft_gone", "Черновик устарел. Начните заново: /operation create.", "The draft expired. Start again with /operation create.")
-_add("op_btn_details", "Описание и слоты · Details", "Details")
-_add("op_btn_publish", "Опубликовать · Publish", "Publish")
-_add("op_btn_cancel", "Отмена · Cancel", "Cancel")
+_add("op_btn_details", "Описание и слоты", "Details")
+_add("op_btn_publish", "Опубликовать", "Publish")
+_add("op_btn_cancel", "Отмена", "Cancel")
 _add("op_cancelled_draft", "Черновик удалён.", "Draft discarded.")
 _add("op_published", "Операция опубликована: {link}", "Operation published: {link}")
 _add("op_signup_title", "Выберите слот:", "Choose a slot:")
@@ -185,7 +185,7 @@ _add("op_brief_none", "У этой операции нет закрытого б
 _add("op_brief_need_signup", "Закрытый брифинг доступен только записавшимся.", "The closed briefing is only for signed-up members.")
 _add("op_brief_later", "Брифинг откроется за {minutes} минут до старта: <t:{ts}:R>.",
      "The briefing opens {minutes} minutes before the start: <t:{ts}:R>.")
-_add("op_brief_title", "Закрытый брифинг · Closed briefing", "Closed briefing")
+_add("op_brief_title", "Закрытый брифинг", "Closed briefing")
 _add("op_manage_title", "Управление операцией #{id}", "Manage operation #{id}")
 _add("op_btn_start", "Начать сейчас", "Start now")
 _add("op_btn_finish", "Завершить", "Finish")
@@ -198,7 +198,7 @@ _add("op_started", "Операция началась.", "The operation has star
 _add("op_finished", "Операция завершена. Явка учтена: {n}.", "Operation finished. Attendance recorded: {n}.")
 _add("op_cancelled", "Операция отменена.", "Operation cancelled.")
 _add("op_state_bad", "Это действие сейчас недоступно.", "That action is not available right now.")
-_add("op_supply_title", "Снабжение · Supply", "Supply")
+_add("op_supply_title", "Снабжение", "Supply")
 _add("op_supply_label", "BMats 1200 (задать) или BMats +200 (добавить)", "BMats 1200 (set) or BMats +200 (add)")
 _add("op_supply_none", "У этой операции нет списка снабжения.", "This operation has no supply list.")
 _add("op_supply_ok", "Снабжение обновлено.", "Supply updated.")
@@ -218,7 +218,7 @@ _add("op_btn_brief", "Брифинг · Briefing", "Briefing")
 _add("op_btn_manage", "Управление · Manage", "Manage")
 
 # -------------------------------------------------------------- priorities --
-_add("pri_modal_title", "Цель · Objective", "Objective")
+_add("pri_modal_title", "Цель", "Objective")
 _add("pri_f_title_ru", "Заголовок (русский)", "Title (Russian)")
 _add("pri_f_title_en", "Title (English)", "Title (English)")
 _add("pri_f_body_ru", "Текст (русский)", "Text (Russian)")
@@ -237,7 +237,8 @@ _add("role_missing", "Роль не настроена. Администрато
 
 async def user_language(interaction) -> str:
     """English before admission, stored preference afterwards; staff channels are Russian."""
-    from . import repo
+    from . import repo, role_jobs
+    from .languages import member_language
     guild = interaction.guild
     if guild is not None:
         cfg = interaction.client.cfg(guild.id)
@@ -246,4 +247,11 @@ async def user_language(interaction) -> str:
         }:
             return 'ru'
     user = await interaction.client.db.read(repo.user_get, interaction.user.id)
-    return user['language'] if user is not None and user['status'] == 'admitted' else 'en'
+    if user is None or user['status'] != 'admitted':
+        return 'en'
+    if guild is None:
+        return user['language']
+    job = await interaction.client.db.read(role_jobs.get, guild.id, interaction.user.id, 'language')
+    if job is not None and job['revision'] != job['applied_revision']:
+        return job['target']
+    return member_language(cfg, interaction.user, user['language'])

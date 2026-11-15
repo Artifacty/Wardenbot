@@ -43,14 +43,14 @@ ROLES: tuple[RoleDef, ...] = (
     RoleDef("private", "››", "Рядовой", "Member", 0x9CC4E8),
     RoleDef("recruit", "›", "Рекрут", "Verified", 0xBAD6EE),
     RoleDef("ally", "○", "Союзник", "Ally", 0x95A5A6),
-    RoleDef("lang_ru", "", "Язык: русский", "Language: Russian", 0x5D6D7E),
-    RoleDef("lang_en", "", "Язык: английский", "Language: English", 0x5D6D7E),
+    RoleDef("lang_ru", "", "Язык: русский", "ru", 0x5D6D7E),
+    RoleDef("lang_en", "", "Язык: английский", "engl", 0x5D6D7E),
     RoleDef("ping_ops", "", "Пинг: операции", "Ping: operations", 0x34495E, mentionable=True),
     RoleDef("ping_logi", "", "Пинг: логистика", "Ping: logistics", 0x34495E, mentionable=True),
 )
 # Retained only when already present; new setups use the nine access/management roles
 # plus the two existing opt-in notification roles. Language is a database preference.
-LEGACY_ROLE_KEYS = frozenset({"counterintel", "ops_officer", "ally", "lang_ru", "lang_en"})
+LEGACY_ROLE_KEYS = frozenset({"counterintel", "ops_officer", "ally"})
 ROLE_BY_KEY = {r.key: r for r in ROLES}
 
 

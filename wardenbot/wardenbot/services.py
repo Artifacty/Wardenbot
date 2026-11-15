@@ -177,3 +177,37 @@ async def sync_member_roles(bot: "WardenBot", guild, user_id: int) -> bool:
         await bot.db.write(repo.role_job_ack, guild.id, user_id, job['revision'])
         latest = await bot.db.read(repo.role_job_get, guild.id, user_id)
         return latest["applied_revision"] == latest["revision"]
+
+
+async def sync_aux_roles(bot, guild, user_id, scope):
+    from . import role_jobs
+    from .languages import ROLE_KEYS, role_ids
+    lock = bot.role_sync_locks.setdefault((guild.id, user_id, scope), asyncio.Lock())
+    async with lock:
+        job = await bot.db.read(role_jobs.get, guild.id, user_id, scope)
+        if job is None or job['applied_revision'] == job['revision']:
+            return True
+        try:
+            member = await guild.fetch_member(user_id)
+            if scope == 'language':
+                target = get_role(bot, guild, ROLE_KEYS[job['target']])
+                opposite = 'en' if job['target'] == 'ru' else 'ru'
+                other_ids = role_ids(bot.cfg(guild.id), guild.roles, opposite)
+                others = [r for r in member.roles if r.id in other_ids]
+            else:
+                target_key = {'leader': 'regiment_co', 'delegate': 'clan_delegate', 'none': None}[job['target']]
+                target = get_role(bot, guild, target_key) if target_key else None
+                others = [r for key in ('regiment_co', 'clan_delegate') if key != target_key
+                          and (r := get_role(bot, guild, key)) is not None and r in member.roles]
+            if target is None and not (scope == 'clan' and job['target'] == 'none'):
+                raise RuntimeError('Role is not configured')
+            if others:
+                await member.remove_roles(*others, reason='Смена роли')
+            if target is not None and target not in member.roles:
+                await member.add_roles(target, reason='Смена роли')
+        except (discord.HTTPException, RuntimeError) as exc:
+            await bot.db.write(role_jobs.failed, job, type(exc).__name__)
+            return False
+        await bot.db.write(role_jobs.acknowledge, job)
+        current = await bot.db.read(role_jobs.get, guild.id, user_id, scope)
+        return current['applied_revision'] == current['revision']

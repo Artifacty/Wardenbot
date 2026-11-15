@@ -168,6 +168,30 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE op_signups ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 0;
     """,
+    # v4: independently retry language and clan role assignments.
+    """
+    CREATE TABLE aux_role_jobs (
+        guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, scope TEXT NOT NULL,
+        target TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+        applied_revision INTEGER NOT NULL DEFAULT 0, last_error TEXT,
+        PRIMARY KEY(guild_id,user_id,scope)
+    );
+    """,
+    # v5: shared clan authority and stable operation ownership.
+    """
+    CREATE TABLE clans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL,
+        name TEXT NOT NULL, name_key TEXT NOT NULL, UNIQUE(guild_id,name_key)
+    );
+    CREATE TABLE clan_members (
+        guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+        clan_id INTEGER NOT NULL REFERENCES clans(id),
+        duty TEXT NOT NULL CHECK(duty IN ('leader','delegate')),
+        PRIMARY KEY(guild_id,user_id)
+    );
+    CREATE UNIQUE INDEX one_clan_leader ON clan_members(clan_id) WHERE duty='leader';
+    ALTER TABLE operations ADD COLUMN clan_id INTEGER REFERENCES clans(id);
+    """,
 ]
 
 

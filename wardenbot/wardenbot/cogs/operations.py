@@ -12,7 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import repo
+from .. import repo, clans
 from ..bot import WardenBot
 from ..i18n import user_language, parse_error_text, t
 from ..opsmeta import (
@@ -20,7 +20,7 @@ from ..opsmeta import (
     STATUS_TAG, TYPE_TAG, URGENT_TAG,
 )
 from ..opsplan import Action, OpTimes, plan_actions
-from ..perms import can_create_ops, can_manage_op, can_staff, is_admitted
+from ..perms import member_role_keys, can_staff, is_admitted
 from ..ranks import noshow_block_until
 from ..render import Card, OpView, SlotView, SupplyView, build_card, thread_title
 from ..services import audit, channel_mention, evaluate_member, get_role, get_text_channel, report_error, reply, utcnow
@@ -77,6 +77,7 @@ class Draft:
     language: str
     tz_name: str
     created: datetime
+    clan_id: int | None = None
     raw1: dict[str, str] = field(default_factory=dict)
     raw2: dict[str, str] = field(default_factory=dict)
     start_at: datetime | None = None
@@ -191,13 +192,13 @@ class DraftView(discord.ui.View):
         super().__init__(timeout=1800)
         self.cog, self.draft, self.lang, self.stage = cog, draft, lang, stage
         if stage == "basics":
-            self._add("Основное · Basics", discord.ButtonStyle.primary, self.open_basics)
+            self._add(("Основное" if lang == "ru" else "Basics"), discord.ButtonStyle.primary, self.open_basics)
         elif stage == "details":
             self._add(t("op_btn_details", lang), discord.ButtonStyle.primary, self.open_details)
         else:
             self._add(t("op_btn_publish", lang), discord.ButtonStyle.success, self.publish)
             self._add(t("op_btn_details", lang), discord.ButtonStyle.secondary, self.open_details)
-            self._add("Основное · Basics", discord.ButtonStyle.secondary, self.open_basics)
+            self._add(("Основное" if lang == "ru" else "Basics"), discord.ButtonStyle.secondary, self.open_basics)
             self._add(t("op_btn_cancel", lang), discord.ButtonStyle.danger, self.discard)
 
     def _add(self, label: str, style: discord.ButtonStyle, handler) -> None:
@@ -282,7 +283,7 @@ class SlotSelectView(discord.ui.View):
             taken = len(s.members)
             full = taken >= s.capacity
             options.append(discord.SelectOption(
-                label=s.name[:100], value=str(s.id), description=(f"{taken}/{s.capacity}" + (" · full" if full else "")),
+                label=s.name[:100], value=str(s.id), description=(f"{taken}/{s.capacity}" + ((" · занято" if lang == "ru" else " · full") if full else "")),
                 default=(s.id == current),
             ))
         select = discord.ui.Select(placeholder=t("op_signup_title", lang), options=options, min_values=1, max_values=1)
@@ -291,6 +292,10 @@ class SlotSelectView(discord.ui.View):
         self.add_item(select)
 
     async def chosen(self, interaction: discord.Interaction) -> None:
+        op = await self.cog.bot.db.read(repo.op_get, self.op_id)
+        if not await self.cog.admitted_here(interaction, op):
+            await reply(interaction, t('err_no_perm', self.lang))
+            return
         slot_id = int(self.select.values[0])
         result = await self.cog.bot.db.write(repo.signup, self.op_id, interaction.user.id, slot_id, utcnow())
         lang = self.lang
@@ -336,7 +341,7 @@ class ManageView(discord.ui.View):
     async def _guard(self, interaction: discord.Interaction):
         op = await self.cog.bot.db.read(repo.op_get, self.op_id)
         member = interaction.user
-        if op is None or not isinstance(member, discord.Member) or not can_manage_op(self.cog.bot, member, op["organizer_id"]):
+        if not await self.cog.allowed_manage(interaction, op):
             await reply(interaction, t("err_no_perm", self.lang))
             return None
         return op
@@ -403,6 +408,10 @@ class SupplyModal(discord.ui.Modal):
         self.add_item(self.f)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        op = await self.cog.bot.db.read(repo.op_get, self.op_id)
+        if not await self.cog.allowed_manage(interaction, op):
+            await reply(interaction, t('err_no_perm', self.lang))
+            return
         try:
             updates = parse_supply_progress(self.f.value, self.names)
         except ParseError as exc:
@@ -427,6 +436,10 @@ class BriefingModal(discord.ui.Modal):
         self.add_item(self.f_closed)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        op = await self.cog.bot.db.read(repo.op_get, self.op_id)
+        if not await self.cog.allowed_manage(interaction, op):
+            await reply(interaction, t('err_no_perm', self.lang))
+            return
         await self.cog.bot.db.write(
             lambda conn: repo.op_update(
                 conn, self.op_id, briefing_public=self.f_public.value.strip(), briefing_closed=self.f_closed.value.strip(),
@@ -553,13 +566,39 @@ class OperationsCog(commands.Cog):
         return True
 
     # ------------------------------------------------------------ publishing --
+    async def admitted_here(self, interaction, op):
+        if (interaction.guild is None or op is None or op['guild_id'] != interaction.guild.id
+                or not isinstance(interaction.user, discord.Member)):
+            return False
+        user = await self.bot.db.read(repo.user_get, interaction.user.id)
+        return bool(user and user['status'] == 'admitted' and is_admitted(self.bot, interaction.user))
+
+    async def creator_clan(self, interaction):
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return None
+        clan = await self.bot.db.read(clans.representative, interaction.guild.id, interaction.user.id)
+        if clan is None:
+            return None
+        required = 'regiment_co' if clan['duty'] == 'leader' else 'clan_delegate'
+        return clan if required in member_role_keys(self.bot, interaction.user) else None
+
+    async def allowed_manage(self, interaction, op):
+        member = interaction.user
+        if interaction.guild is None or not isinstance(member, discord.Member):
+            return False
+        return await self.bot.db.read(clans.may_manage, interaction.guild.id, member.id, op,
+                                      can_staff(self.bot, member), member_role_keys(self.bot, member))
+
     async def user_tz(self, user_id: int) -> str:
         user = await self.bot.db.read(repo.user_get, user_id)
         return (user["tz"] if user is not None and user["tz"] else None) or self.bot.config.default_tz
 
     async def publish_draft(self, interaction: discord.Interaction, d: Draft) -> str | None:
         guild = interaction.guild
-        assert guild is not None
+        clan = await self.creator_clan(interaction)
+        if (guild is None or guild.id != d.guild_id or interaction.user.id != d.organizer_id
+                or clan is None or clan['clan_id'] != d.clan_id):
+            raise ParseError('no_perm')
         forum = get_text_channel(self.bot, guild, "ops_board")
         if not isinstance(forum, discord.ForumChannel):
             return None
@@ -573,7 +612,7 @@ class OperationsCog(commands.Cog):
                 conn, guild_id=guild.id, organizer_id=d.organizer_id, title=d.raw1["title"], region=d.raw1.get("region", ""),
                 type=d.type, language=d.language, start_at=d.start_at, duration_min=d.duration_min or 60,
                 requirements=d.raw1.get("requirements", ""), briefing_public=d.raw2.get("public", ""),
-                briefing_closed=d.raw2.get("closed", ""), slots=d.slots, supply=d.supply, now=now,
+                briefing_closed=d.raw2.get("closed", ""), slots=d.slots, supply=d.supply, now=now, clan_id=d.clan_id,
             )
         )
         view = await self.bot.db.read(load_view, op_id)
@@ -620,7 +659,8 @@ class OperationsCog(commands.Cog):
         if interaction.guild is None or not isinstance(member, discord.Member):
             await reply(interaction, t("err_guild_only", lang))
             return
-        if not can_create_ops(self.bot, member):
+        clan = await self.creator_clan(interaction)
+        if clan is None:
             await reply(interaction, t("err_no_perm", lang))
             return
         if not isinstance(get_text_channel(self.bot, interaction.guild, "ops_board"), discord.ForumChannel):
@@ -631,7 +671,7 @@ class OperationsCog(commands.Cog):
             self.drafts.pop(uid, None)
         draft = Draft(
             guild_id=interaction.guild.id, organizer_id=member.id, type=type.value, language=language.value,
-            tz_name=await self.user_tz(member.id), created=now,
+            tz_name=await self.user_tz(member.id), created=now, clan_id=clan["clan_id"],
         )
         self.drafts[member.id] = draft
         await interaction.response.send_modal(BasicsModal(self, draft, lang))
@@ -645,7 +685,7 @@ class OperationsCog(commands.Cog):
         if op is None or op["guild_id"] != getattr(interaction.guild, "id", None):
             await reply(interaction, t("err_op_missing", lang))
             return
-        if not isinstance(member, discord.Member) or not can_manage_op(self.bot, member, op["organizer_id"]):
+        if not await self.allowed_manage(interaction, op):
             await reply(interaction, t("err_no_perm", lang))
             return
         ok = await self.bot.db.write(repo.mark_noshow, operation, player.id)
@@ -660,7 +700,7 @@ class OperationsCog(commands.Cog):
         if op is None or op['guild_id'] != getattr(interaction.guild, 'id', None):
             await reply(interaction, t('err_op_missing', lang))
             return
-        if not isinstance(interaction.user, discord.Member) or not can_manage_op(self.bot, interaction.user, op['organizer_id']):
+        if not await self.allowed_manage(interaction, op):
             await reply(interaction, t('err_no_perm', lang))
             return
         changed = await self.bot.db.write(repo.confirm_attendance, operation, player.id, attended)
@@ -697,7 +737,8 @@ class OperationsCog(commands.Cog):
         if guild is None or not isinstance(member, discord.Member):
             await reply(interaction, t("err_guild_only", lang))
             return
-        if not is_admitted(self.bot, member):
+        op = await self.bot.db.read(repo.op_get, op_id)
+        if not await self.admitted_here(interaction, op):
             await reply(interaction, t("err_not_admitted", lang, verify=channel_mention(self.bot, guild.id, "verify")))
             return
         now = utcnow()
@@ -736,7 +777,10 @@ class OperationsCog(commands.Cog):
         if not op["briefing_closed"].strip():
             await reply(interaction, t("op_brief_none", lang))
             return
-        privileged = can_manage_op(self.bot, member, op["organizer_id"])
+        privileged = await self.allowed_manage(interaction, op)
+        if not privileged and not await self.admitted_here(interaction, op):
+            await reply(interaction, t('err_no_perm', lang))
+            return
         signed = await self.bot.db.read(repo.op_signup_of, op_id, member.id)
         if not privileged and signed is None:
             await reply(interaction, t("op_brief_need_signup", lang))
@@ -752,7 +796,7 @@ class OperationsCog(commands.Cog):
         lang = await user_language(interaction)
         op = await self.bot.db.read(repo.op_get, op_id)
         member = interaction.user
-        if op is None or not isinstance(member, discord.Member) or not can_manage_op(self.bot, member, op["organizer_id"]):
+        if op is None or not await self.allowed_manage(interaction, op):
             await reply(interaction, t("err_no_perm", lang))
             return
         await reply(

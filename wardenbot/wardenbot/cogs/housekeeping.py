@@ -7,9 +7,9 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
-from .. import repo
+from .. import repo, role_jobs
 from ..bot import WardenBot
-from ..services import audit, evaluate_member, sync_member_roles
+from ..services import audit, evaluate_member, sync_member_roles, sync_aux_roles
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +54,14 @@ class HousekeepingCog(commands.Cog):
             except Exception:
                 log.exception("Role synchronization failed for %s", job['user_id'])
 
+        for job in await self.bot.db.read(role_jobs.pending):
+            guild = self.bot.get_guild(job['guild_id'])
+            if guild is not None:
+                try:
+                    await sync_aux_roles(self.bot, guild, job['user_id'], job['scope'])
+                except Exception:
+                    log.exception("Auxiliary role synchronization failed for %s", job['user_id'])
+
     @role_sync.before_loop
     async def _before_roles(self) -> None:
         await self.bot.wait_until_ready()
@@ -67,6 +75,8 @@ class HousekeepingCog(commands.Cog):
             target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
                 'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
             repo.role_job_set(conn, member.guild.id, member.id, target)
+            if user and user['status'] == 'admitted':
+                role_jobs.enqueue(conn, member.guild.id, member.id, 'language', user['language'])
         await self.bot.db.write(queue)
         await sync_member_roles(self.bot, member.guild, member.id)
         age = (discord.utils.utcnow() - member.created_at).days

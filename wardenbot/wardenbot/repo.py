@@ -219,12 +219,13 @@ def op_create(
     slots: list[SlotSpec],
     supply: list[SupplySpec],
     now: datetime,
+    clan_id: int | None = None,
 ) -> int:
     cur = conn.execute(
         "INSERT INTO operations(guild_id,organizer_id,title,region,type,language,start_at,duration_min,"
-        "requirements,briefing_public,briefing_closed,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "requirements,briefing_public,briefing_closed,created_at,clan_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (guild_id, organizer_id, title, region, type, language, to_iso(start_at), duration_min,
-         requirements, briefing_public, briefing_closed, _now_iso(now)),
+         requirements, briefing_public, briefing_closed, _now_iso(now), clan_id),
     )
     op_id = int(cur.lastrowid)
     for pos, s in enumerate(slots):

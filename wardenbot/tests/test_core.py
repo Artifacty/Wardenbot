@@ -186,7 +186,7 @@ def test_migration_is_idempotent(tmp_path):
     path = str(tmp_path / "x.db")
     connect(path).close()
     c = connect(path)
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 5
     c.close()
 
 

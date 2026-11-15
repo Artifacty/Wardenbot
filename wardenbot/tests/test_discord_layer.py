@@ -199,7 +199,7 @@ def test_all_format_placeholders_are_formattable():
 def fake_member(user_id, role_ids=(), cls=discord.Member):
     m = MagicMock(spec=cls)
     m.id = user_id
-    m.roles = [SimpleNamespace(id=r) for r in role_ids]
+    m.roles = [SimpleNamespace(id=r, name=f"role-{r}") for r in role_ids]
     m.guild = SimpleNamespace(id=1)
     m.guild_permissions = SimpleNamespace(administrator=False)
     return m
@@ -236,6 +236,8 @@ def test_signup_flow_end_to_end_with_capacity():
                 briefing_closed="secret plan", slots=[SlotSpec("Inf", 1), SlotSpec("AT", 2)], supply=[SupplySpec("BMats", 100)], now=now,
             )
         )
+        for uid in (11, 12, 99):
+            await bot.db.write(repo.user_update, uid, now, status="admitted", language="en")
         # an unverified user is turned away
         stranger = make_interaction(fake_member(10))
         await cog.on_signup(stranger, op_id)
@@ -271,6 +273,17 @@ def test_signup_flow_end_to_end_with_capacity():
         b3 = make_interaction(fake_member(99, [500]))
         await cog.on_brief(b3, op_id)
         assert b3.response.send_message.call_args.kwargs["embed"].description == "secret plan"
+
+        # Revocation blocks a previously opened picker and the private briefing.
+        await bot.db.write(repo.user_update, 12, now, status="rejected")
+        stale = make_interaction(fake_member(12, [500]))
+        await view2.chosen(stale)
+        assert stale.response.send_message.called
+        assert await bot.db.read(repo.op_signup_of, op_id, 12) is None
+        await bot.db.write(repo.user_update, 11, now, status="rejected")
+        denied = make_interaction(fake_member(11, [500]))
+        await cog.on_brief(denied, op_id)
+        assert "embed" not in denied.response.send_message.call_args.kwargs
 
         # leaving
         lv = make_interaction(fake_member(11, [500]))

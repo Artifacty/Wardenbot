@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .. import repo
+from .. import repo, role_jobs
 from ..bot import WardenBot
 from ..codeword import generate_code
 from ..i18n import user_language, parse_error_text, t
@@ -273,6 +273,7 @@ async def decide(
                 admitted_by=interaction.user.id, steam_key=req["steam_key"], steam_url=req["steam_url"],
                 ingame_name=req["ingame_name"], regiment=req["regiment"], language=req["language"],
             )
+            role_jobs.enqueue(conn, guild.id, uid, 'language', req['language'])
         elif status == "rejected":
             repo.user_update(conn, uid, now, status="rejected", last_reject_at=to_iso(now))
         if status in ("approved", "rejected"):

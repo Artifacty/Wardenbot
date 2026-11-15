@@ -26,6 +26,8 @@ EXTENSIONS = (
     "wardenbot.cogs.priorities",
     "wardenbot.cogs.members",
     "wardenbot.cogs.selfroles",
+    "wardenbot.cogs.menu",
+    "wardenbot.cogs.clans",
     "wardenbot.cogs.housekeeping",
 )
 
@@ -43,7 +45,7 @@ class WardenBot(commands.Bot):
         self.config = config
         self.db = db
         self.rank_rules = RankRules()
-        self.role_sync_locks: dict[tuple[int, int], asyncio.Lock] = {}
+        self.role_sync_locks: dict[tuple, asyncio.Lock] = {}
         self._cfg: dict[int, dict[str, str]] = {}
         self.tree.on_error = self._on_tree_error  # type: ignore[assignment]
 
@@ -72,7 +74,10 @@ class WardenBot(commands.Bot):
 
     async def _sync_commands(self) -> None:
         """Sync slash commands only when their definition changed (Discord rate-limits creation)."""
-        payload = [c.to_dict(self.tree) for c in self.tree.get_commands()]
+        from .command_locale import CommandTranslator
+        if self.tree.translator is None:
+            await self.tree.set_translator(CommandTranslator())
+        payload = [await c.get_translated_payload(self.tree, self.tree.translator) for c in self.tree.get_commands()]
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
         scope = self.config.dev_guild_id or 0
         stored = self.cfg(0).get(f"commands_hash.{scope}")
