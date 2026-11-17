@@ -19,7 +19,7 @@ class Editor(discord.ui.Modal):
                    ('type','Тип: offense/defense/logistics/naval/partisan/training',op['type'],30),
                    ('requirements','Требования',op['requirements'],400)]
         elif section=='schedule':
-            specs=[('start','Начало: ГГГГ-ММ-ДД ЧЧ:ММ',from_iso(op['start_at']).astimezone(resolve_tz(op['timezone'])[0]).strftime('%Y-%m-%d %H:%M'),30),
+            specs=[('start','Начало: дата и время / завтра 20:30',from_iso(op['start_at']).astimezone(resolve_tz(op['timezone'])[0]).strftime('%Y-%m-%d %H:%M'),40),
                    ('timezone','Часовой пояс (Europe/Moscow, UTC+3)',op['timezone'],50),
                    ('duration','Длительность, часов',str(op['duration_min']/60),12)]
         else:
@@ -30,6 +30,7 @@ class Editor(discord.ui.Modal):
         for key,label,value,size in specs:
             item=discord.ui.TextInput(label=label[:45],default=value,max_length=size,
                 required=key in ('title','type','start','timezone','duration','slots'),
+                placeholder='завтра 20:30 / через 30 минут / 25.11 19:00' if key=='start' else None,
                 style=discord.TextStyle.paragraph if size>300 else discord.TextStyle.short)
             self.inputs[key]=item
             self.add_item(item)

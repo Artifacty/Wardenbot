@@ -105,7 +105,7 @@ class ChannelDef:
     def name(self, style: str = "full") -> str:
         if self.access == "public":
             style = "en"
-        elif self.access in ("staff", "screening", "command"):
+        else:
             style = "ru"
         if style == "ru":
             body = f"{self.symbol}┃{self.ru}"
@@ -140,7 +140,7 @@ class CategoryDef:
             return f"{self.number} // {self.en} {self.emoji}"
         if self.key == "command":
             return f"{self.number} // {self.ru} {self.emoji}"
-        return f"{self.number} // {self.ru} · {self.en} {self.emoji}"
+        return f"{self.number} // {self.ru} {self.emoji}"
 
 
 def _ch(key, kind, symbol, ru, en, emoji, topic_ru, topic_en, access, mode, **kw) -> ChannelDef:

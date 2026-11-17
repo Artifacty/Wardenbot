@@ -230,6 +230,22 @@ MIGRATIONS: list[str] = [
 
     """,
 
+    """
+    CREATE TABLE community_posts (
+        id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, owner_id INTEGER NOT NULL,
+        kind TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, capacity INTEGER NOT NULL DEFAULT 1,
+        state TEXT NOT NULL DEFAULT 'open', channel_id INTEGER, message_id INTEGER, request_key TEXT UNIQUE
+    );
+    CREATE TABLE group_members (
+        post_id INTEGER NOT NULL REFERENCES community_posts(id), user_id INTEGER NOT NULL,
+        PRIMARY KEY(post_id,user_id)
+    );
+    CREATE TABLE activity_rooms (
+        guild_id INTEGER NOT NULL, source TEXT NOT NULL, source_id INTEGER NOT NULL,
+        role TEXT NOT NULL, channel_id INTEGER NOT NULL, PRIMARY KEY(guild_id,source,source_id,role)
+    );
+    """,
+
 ]
 
 

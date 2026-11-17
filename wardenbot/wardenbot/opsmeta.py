@@ -73,12 +73,12 @@ ALL_FORUM_TAGS: list[str] = [
 ]
 
 DEFAULT_SLOTS: dict[str, str] = {
-    "offense": "Пехота · Infantry 20, ПТ · AT 6, Танкисты · Tankers 4, Медики · Medics 3, Инженеры · Engineers 4, Логисты · Logi 6",
-    "defense": "Пехота · Infantry 20, ПТ · AT 6, Инженеры · Engineers 6, Медики · Medics 3, Логисты · Logi 6",
-    "logistics": "Водители · Drivers 10, Погрузка · Loaders 6, Охрана · Escort 4",
-    "naval": "Экипаж · Crew 12, Десант · Marines 10",
-    "partisan": "Пехота · Infantry 8, ПТ · AT 2, Разведка · Scouts 2",
-    "training": "Новички · Rookies 20, Наставники · Mentors 5",
+    "offense": "Пехота: 20\nПТ: 6\nТанкисты: 4\nМедики: 3\nИнженеры: 4\nЛогисты: 6",
+    "defense": "Пехота: 20\nПТ: 6\nИнженеры: 6\nМедики: 3\nЛогисты: 6",
+    "logistics": "Водители: 10\nПогрузка: 6\nОхрана: 4",
+    "naval": "Экипаж: 12\nДесант: 10",
+    "partisan": "Пехота: 8\nПТ: 2\nРазведка: 2",
+    "training": "Новички: 20\nНаставники: 5",
 }
 
-DEFAULT_SUPPLY = "BMats 5000, Fuel · Топливо 2000"
+DEFAULT_SUPPLY = "Базовые материалы: 5000\nТопливо: 2000"

@@ -171,7 +171,7 @@ def test_setup_reuses_role_ids_and_preserves_trading_channels():
         guild.get_channel.return_value = existing
         bot.cfg(1)['ch.sell'] = '123'
         assert await cog._ensure_channel(guild, MagicMock(), CHANNEL_BY_KEY['sell'], roles, True, []) is existing
-        existing.edit.assert_not_awaited()
+        existing.edit.assert_awaited_once_with(name=CHANNEL_BY_KEY['sell'].name(), reason='Русское название')
         bot.db.close()
     asyncio.run(go())
 

@@ -99,6 +99,12 @@ def parse_local_datetime(text: str, tz: tzinfo, now: datetime | None = None) -> 
     'today 19:00', '20:00' (today, or tomorrow if that time has passed).
     """
     now_utc = now or datetime.now(UTC)
+    relative = re.fullmatch(r"через\s+(\d+)\s*(минут[уы]?|мин|м|час[ао]?в?|ч)", (text or "").strip().lower())
+    if relative:
+        minutes = int(relative[1]) * (60 if relative[2].startswith('ч') else 1)
+        if not 1 <= minutes <= 10080:
+            raise ParseError('bad_datetime')
+        return (now_utc + timedelta(minutes=minutes)).astimezone(UTC)
     local_now = now_utc.astimezone(tz)
     cleaned = " ".join((text or "").replace("T", " ").split())
     if not cleaned:

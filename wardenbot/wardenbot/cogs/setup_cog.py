@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from .. import repo, role_jobs
+from ..db import MIGRATIONS
 from ..bot import WardenBot
 from ..i18n import user_language, t
 from ..invite import role_permissions
@@ -111,8 +112,10 @@ class SetupCog(commands.Cog):
             existing = guild.get_channel(int(stored))
         overwrites = self._target_overwrites(category_overwrites(cat), roles, guild)
         if isinstance(existing, discord.CategoryChannel):
+            changes = {"name": cat.name, "reason": "Русское название категории"}
             if cat.key in ("entry", "command"):
-                await existing.edit(name=cat.name, overwrites=overwrites, reason="Язык и доступ категории")
+                changes["overwrites"] = overwrites
+            await existing.edit(**changes)
             return existing
         created = await guild.create_category(name=cat.name, overwrites=overwrites, reason="Warden setup")
         await self.bot.set_cfg(guild.id, f"cat.{cat.key}", created.id)
@@ -133,6 +136,7 @@ class SetupCog(commands.Cog):
         if existing is not None:
             # Trading channels and their configured permissions are explicitly preserved.
             if ch.key in ("sell", "buy", "services"):
+                await existing.edit(name=name, reason="Русское название")
                 return existing
             policy_channel = ch.access in ("public", "staff", "screening", "command") or ch.key == "news"
             if policy_channel:
@@ -140,7 +144,9 @@ class SetupCog(commands.Cog):
                 if ch.kind != "voice":
                     changes['topic'] = ch.topic
                 await existing.edit(**changes)
-            elif fix:
+            else:
+                await existing.edit(name=name, reason="Русское название")
+            if fix and not policy_channel:
                 try:
                     await existing.edit(overwrites=overwrites, reason="Warden setup: fix permissions")
                     log_lines.append(f"Права восстановлены: {existing.name}")
@@ -271,6 +277,9 @@ class SetupCog(commands.Cog):
             )
             await self._upsert(guild, "verify", verify, embeds=[embed], view=build_verify_view())
             notes.append("verify")
+        community = self.bot.get_cog("CommunityCog")
+        if community is not None:
+            await community.panels(guild)
         return notes
 
     # ------------------------------------------------------------ commands --
@@ -301,7 +310,7 @@ class SetupCog(commands.Cog):
         try:
             roles = await self._ensure_roles(guild, lines)
             for cat in CATEGORIES:
-                chans = [c for c in cat.channels if c.launch or include_later]
+                chans = [c for c in cat.channels if c.launch or include_later or self.bot.cfg(guild.id).get(f"ch.{c.key}")]
                 if not chans:
                     continue
                 category = await self._ensure_category(guild, cat, roles, lines)
@@ -358,7 +367,7 @@ class SetupCog(commands.Cog):
         from pathlib import Path
         counts=await self.bot.db.read(lambda c:(c.execute("SELECT COUNT(*) FROM notifications WHERE state='pending'").fetchone()[0],
                     c.execute('SELECT COUNT(*) FROM role_jobs WHERE applied_revision<revision').fetchone()[0]))
-        lines = [f"БД: {Path(self.bot.db.path).resolve().name}; схема 7",f"Очереди: уведомления {counts[0]}, роли {counts[1]}",
+        lines = [f"БД: {Path(self.bot.db.path).resolve().name}; схема {len(MIGRATIONS)}",f"Очереди: уведомления {counts[0]}, роли {counts[1]}",
                  f"Message Content Intent: {self.bot.intents.message_content}"]
         for rd in ROLES:
             rid = cfg.get(f"role.{rd.key}")

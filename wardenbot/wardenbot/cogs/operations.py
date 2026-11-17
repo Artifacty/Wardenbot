@@ -117,15 +117,15 @@ async def respond_draft(
 
 class BasicsModal(discord.ui.Modal):
     def __init__(self, cog: "OperationsCog", draft: Draft, lang: str) -> None:
-        super().__init__(title=t("op_modal_title", lang), timeout=900)
+        super().__init__(title=f"Операция · {draft.tz_name}"[:45], timeout=900)
         self.cog, self.draft, self.lang = cog, draft, lang
         raw = draft.raw1
         self.f_title = discord.ui.TextInput(label=t("op_f_title", lang), default=raw.get("title"), max_length=80)
         self.f_region = discord.ui.TextInput(label=t("op_f_region", lang), default=raw.get("region"), required=False, max_length=40)
         self.f_start = discord.ui.TextInput(
-            label=t("op_f_start", lang), default=raw.get("start"), max_length=30, placeholder="08.11 20:00 · 2026-11-08 20:00",
+            label="Когда начинаем? Например: завтра 20:30", default=raw.get("start"), max_length=40, placeholder="сегодня 20:30 / завтра 19:00 / через 30 минут",
         )
-        self.f_duration = discord.ui.TextInput(label=t("op_f_duration", lang), default=raw.get("duration") or "2", max_length=12)
+        self.f_duration = discord.ui.TextInput(label=t("op_f_duration", lang), default=raw.get("duration") or "2", placeholder="2 = два часа; 90m = полтора часа", max_length=12)
         self.f_req = discord.ui.TextInput(
             label=t("op_f_requirements", lang), default=raw.get("requirements"), required=False,
             style=discord.TextStyle.paragraph, max_length=400,
@@ -168,8 +168,8 @@ class DetailsModal(discord.ui.Modal):
         para = discord.TextStyle.paragraph
         self.f_public = discord.ui.TextInput(label=t("op_f_public", lang), default=raw.get("public"), required=False, style=para, max_length=1500)
         self.f_closed = discord.ui.TextInput(label=t("op_f_closed", lang), default=raw.get("closed"), required=False, style=para, max_length=1500)
-        self.f_slots = discord.ui.TextInput(label=t("op_f_slots", lang), default=default_slots[:600], style=para, max_length=600)
-        self.f_supply = discord.ui.TextInput(label=t("op_f_supply", lang), default=default_supply[:300], required=False, style=para, max_length=300)
+        self.f_slots = discord.ui.TextInput(label=t("op_f_slots", lang), default=default_slots[:600], style=para, max_length=600, placeholder="Пехота: 10\nТанкист: 6")
+        self.f_supply = discord.ui.TextInput(label=t("op_f_supply", lang), default=default_supply[:300], required=False, style=para, max_length=300, placeholder="Бинты: 100\nДизель: 50")
         for item in (self.f_public, self.f_closed, self.f_slots, self.f_supply):
             self.add_item(item)
 
@@ -557,7 +557,16 @@ class OperationsCog(commands.Cog):
         async with self.op_lock(op_id):
             await self._refresh_card(op_id)
 
+    async def sync_rooms(self, op_id):
+        community = self.bot.get_cog("CommunityCog")
+        if community is not None:
+            try:
+                await community.sync_operation(op_id)
+            except Exception:
+                log.exception("Operation rooms %s await background retry", op_id)
+
     async def _refresh_card(self, op_id):
+        await self.sync_rooms(op_id)
         view,op = await self.bot.db.read(lambda c:(load_view(c,op_id),repo.op_get(c,op_id)))
         if view is None or op is None:
             return
@@ -705,6 +714,7 @@ class OperationsCog(commands.Cog):
 
         await self.bot.db.write(link)
         d.published_url=created.thread.jump_url
+        await self.sync_rooms(op_id)
         return d.published_url
 
     async def recover_publication(self,op):

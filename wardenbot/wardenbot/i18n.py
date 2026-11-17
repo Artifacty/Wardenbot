@@ -45,7 +45,7 @@ _add("err_need_setup", "Сервер ещё не настроен: админи�
      "The server is not set up yet: an administrator must run /setup run.")
 _add("err_not_admitted", "Сначала пройдите допуск в канале {verify}.", "Pass verification first in {verify}.")
 _add("err_op_missing", "Операция не найдена.", "Operation not found.")
-_add("err_bad_datetime", "Не понял дату. Примеры: 2026-11-08 20:00, 08.11 20:00, завтра 21:30.",
+_add("err_bad_datetime", "Укажите, когда начать: завтра 20:30, сегодня 21:00, через 30 минут или 25.11 19:00. Часовой пояс — в заголовке формы.",
      "Could not read the date. Examples: 2026-11-08 20:00, 08.11 20:00, tomorrow 21:30.")
 _add("err_past", "Это время уже прошло.", "That time is in the past.")
 _add("err_too_far", "Операцию можно запланировать не дальше чем на 120 дней вперёд.",
@@ -155,15 +155,15 @@ _add("op_f_requirements", "Требования (микрофон, опыт, т�
 _add("op_modal2_title", "Детали операции", "Operation details")
 _add("op_f_public", "Описание для всех (без точных деталей)", "Public briefing (no exact details)")
 _add("op_f_closed", "Закрытый брифинг (откроется записавшимся)", "Closed briefing (opens to sign-ups)")
-_add("op_f_slots", "Слоты: Название число, через запятую", "Slots: Name number, comma separated")
-_add("op_f_supply", "Снабжение: BMats 5000, Fuel 2000", "Supply: BMats 5000, Fuel 2000")
+_add("op_f_slots", "Места: Пехота: 10 (по строке)", "Slots: Name number, comma separated")
+_add("op_f_supply", "Нужно ресурсов (необязательно)", "Supply: BMats 5000, Fuel 2000")
 _add("op_draft_basic",
-     "Основное сохранено. Время указано по поясу **{tz}** (сменить: `/timezone set`). Теперь добавьте описание и слоты.",
+     "Основное сохранено. Время указано по поясу **{tz}** (сменить: `/timezone set`). Теперь добавьте задачу и места участников. Закрытый план и ресурсы можно пропустить.",
      "Basics saved. Times use the **{tz}** zone (change it with `/timezone set`). Now add the briefing and slots.")
 _add("op_draft_ready", "Предпросмотр ниже. Если всё верно, нажмите «Опубликовать».",
      "Preview below. If everything is right, press Publish.")
 _add("op_draft_gone", "Черновик устарел. Начните заново: /operation create.", "The draft expired. Start again with /operation create.")
-_add("op_btn_details", "Описание и слоты", "Details")
+_add("op_btn_details", "План и места", "Details")
 _add("op_btn_publish", "Опубликовать", "Publish")
 _add("op_btn_cancel", "Отмена", "Cancel")
 _add("op_cancelled_draft", "Черновик удалён.", "Draft discarded.")

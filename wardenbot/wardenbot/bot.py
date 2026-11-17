@@ -27,6 +27,7 @@ EXTENSIONS = (
     "wardenbot.cogs.members",
     "wardenbot.cogs.selfroles",
     "wardenbot.cogs.menu",
+    "wardenbot.cogs.community",
     "wardenbot.cogs.moderation",
     "wardenbot.cogs.clans",
     "wardenbot.cogs.housekeeping",
