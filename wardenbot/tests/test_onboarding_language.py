@@ -186,6 +186,8 @@ def test_dev_command_tree_restored_when_remote_sync_is_cached(tmp_path):
             async def probe(interaction):
                 pass
             bot.tree.sync = AsyncMock(return_value=[])
+            from types import SimpleNamespace
+            bot.tree.fetch_commands = AsyncMock(return_value=[SimpleNamespace(name='probe', type=discord.AppCommandType.chat_input)])
             await bot._sync_commands()
             assert bot.tree.sync.await_count == expected_syncs
             assert bot.tree.get_command('probe', guild=discord.Object(id=42)) is not None

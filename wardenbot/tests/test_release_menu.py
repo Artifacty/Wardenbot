@@ -90,7 +90,7 @@ def test_command_scope_change_clears_old_guild_commands():
         bot.cfg(0)['commands_hash.42']='old'
         bot.tree.sync=AsyncMock(return_value=[])
         await bot._sync_commands()
-        assert bot.tree.sync.call_args_list[0].kwargs['guild'].id==42
-        assert not bot.tree.sync.call_args_list[-1].kwargs
+        assert not bot.tree.sync.call_args_list[0].kwargs
+        assert bot.tree.sync.call_args_list[-1].kwargs['guild'].id==42
         bot.db.close()
     asyncio.run(go())

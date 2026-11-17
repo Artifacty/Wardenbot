@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 
@@ -11,7 +12,11 @@ from .db import Database
 from .instance_lock import instance_lock
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Wardenbot: запуск Discord-бота")
+    parser.add_argument("--sync-commands", action="store_true",
+                        help="Принудительно зарегистрировать slash-команды перед подключением")
+    args = parser.parse_args(argv)
     try:
         config = load_config()
     except ConfigError as exc:
@@ -24,7 +29,7 @@ def main() -> int:
     try:
         with instance_lock(config.db_path):
             db = Database(config.db_path)
-            bot = WardenBot(config, db)
+            bot = WardenBot(config, db, force_command_sync=args.sync_commands)
             try:
                 bot.run(config.token, log_handler=None)
             finally:

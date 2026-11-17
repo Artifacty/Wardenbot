@@ -35,7 +35,7 @@ EXTENSIONS = (
 
 
 class WardenBot(commands.Bot):
-    def __init__(self, config: Config, db: Database) -> None:
+    def __init__(self, config: Config, db: Database, *, force_command_sync: bool = False) -> None:
         intents = discord.Intents.default()
         intents.message_content = config.message_content_intent
         intents.members = True  # privileged: enable "Server Members Intent" in the Developer Portal
@@ -46,6 +46,7 @@ class WardenBot(commands.Bot):
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True),
         )
         self.config = config
+        self.force_command_sync = force_command_sync
         self.db = db
         self.rank_rules = RankRules()
         self.role_sync_locks: dict[tuple, asyncio.Lock] = {}
@@ -73,45 +74,71 @@ class WardenBot(commands.Bot):
         await self._load_cfg()
         for ext in EXTENSIONS:
             await self.load_extension(ext)
-        await self._sync_commands()
+        await self._sync_commands(force=self.force_command_sync)
 
     async def _sync_commands(self, force: bool = False) -> None:
-        """Sync slash commands only when their definition changed (Discord rate-limits creation)."""
+        """Check remote registration even when local definitions have not changed."""
         from .command_locale import CommandTranslator
         if self.tree.translator is None:
             await self.tree.set_translator(CommandTranslator())
         payload = [await c.get_translated_payload(self.tree, self.tree.translator) for c in self.tree.get_commands()]
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
         scope = self.config.dev_guild_id or 0
+        label = f"server {scope} (DEV_GUILD_ID)" if scope else "global (all servers)"
+        log.info("Checking slash commands: application=%s, scope=%s, force=%s", self.application_id, label, force)
         cache_key = f"commands_hash.{self.application_id}.{scope}"
         stored = self.cfg(0).get(cache_key)
-        guild = discord.Object(id=self.config.dev_guild_id) if self.config.dev_guild_id else None
-        old_scope=self.cfg(0).get(f'commands_scope.{self.application_id}')
-        legacy_scopes={int(k.split('.')[-1]) for k in self.cfg(0)
-                       if k.startswith('commands_hash.') and len(k.split('.'))==2 and k.split('.')[-1].isdigit()}
-        stale=({int(old_scope)} if old_scope and old_scope.isdigit() else legacy_scopes)-{0,scope}
+        guild = discord.Object(id=scope) if scope else None
+        if guild is not None:
+            self.tree.copy_global_to(guild=guild)
+
+        needs_sync = force or stored != digest
+        if not needs_sync:
+            try:
+                remote = await self.tree.fetch_commands(guild=guild)
+            except discord.HTTPException as error:
+                log.warning("Could not verify slash commands (%s, Discord code %s). "
+                            "Keeping cached registration; use --sync-commands to repair.", label, error.code)
+                return
+            expected = {(item['name'], item.get('type', 1)) for item in payload}
+            actual = {(command.name, command.type.value) for command in remote}
+            needs_sync = actual != expected
+            if needs_sync:
+                log.warning("Discord command list differs from local cache (%s); restoring registration", label)
+            else:
+                log.info("Verified %d slash commands on Discord (%s)", len(remote), label)
+        if needs_sync:
+            synced = await self.tree.sync(guild=guild) if guild else await self.tree.sync()
+            await self.set_cfg(0, cache_key, digest)
+            log.info("Synced %d slash commands (%s)", len(synced), label)
+
+        # Remove an obsolete test-server registration only AFTER its replacement is ready.
+        old_scope = self.cfg(0).get(f'commands_scope.{self.application_id}')
+        legacy_scopes = {int(k.split('.')[-1]) for k in self.cfg(0)
+                         if k.startswith('commands_hash.') and len(k.split('.')) == 2 and k.split('.')[-1].isdigit()}
+        stale = ({int(old_scope)} if old_scope and old_scope.isdigit() else legacy_scopes) - {0, scope}
+        cleaned = True
         for old in stale:
-            old_guild=discord.Object(id=old)
+            old_guild = discord.Object(id=old)
             self.tree.clear_commands(guild=old_guild)
             try:
                 await self.tree.sync(guild=old_guild)
             except discord.HTTPException:
-                log.warning('Could not clear old command scope %s; retry with /setup sync',old)
-        if guild is not None:
-            self.tree.copy_global_to(guild=guild)
-        if stored == digest and not force:
-            log.info("Slash commands unchanged; skipping sync")
-            return
-        if guild is not None:
-            synced = await self.tree.sync(guild=guild)
-        else:
-            synced = await self.tree.sync()
-        await self.set_cfg(0, cache_key, digest)
-        await self.set_cfg(0,f'commands_scope.{self.application_id}',scope)
-        log.info("Synced %d slash commands (%s)", len(synced), "dev guild" if scope else "global")
+                cleaned = False
+                log.warning('Could not clear old command scope %s; retry with /setup sync', old)
+        if cleaned:
+            await self.set_cfg(0, f'commands_scope.{self.application_id}', scope)
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%s) in %d guild(s)", self.user, getattr(self.user, "id", "?"), len(self.guilds))
+        for guild in self.guilds:
+            log.info("Discord server: %s (id=%s)", guild.name, guild.id)
+        scope = self.config.dev_guild_id
+        if scope:
+            if self.get_guild(scope) is None:
+                log.warning("DEV_GUILD_ID=%s is not among connected servers. Clear DEV_GUILD_ID for global commands.", scope)
+            elif len(self.guilds) > 1:
+                log.warning("Commands are registered for server %s only. Clear DEV_GUILD_ID for commands on all servers.", scope)
 
     async def _on_tree_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         original = getattr(error, "original", error)
