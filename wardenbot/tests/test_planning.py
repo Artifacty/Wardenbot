@@ -24,8 +24,8 @@ def test_remind_60_once():
 
 
 def test_remind_10_once_and_skips_60_when_late():
-    now = START - timedelta(minutes=9)
-    assert kinds([op()], now) == ["remind10"]  # bot was offline: only the useful one
+    now = START - timedelta(minutes=15)
+    assert kinds([op()], now) == ["remind15"]  # bot was offline: only the useful one
     assert kinds([op(r60=True, r10=True)], now) == []
 
 
@@ -34,12 +34,12 @@ def test_start_at_t0():
     assert kinds([op(status="running")], START + timedelta(minutes=5)) == []
 
 
-def test_autoclose_after_end_plus_grace():
+def test_no_autoclose_after_end_plus_grace():
     end = START + timedelta(minutes=120)
     assert kinds([op(status="running")], end + timedelta(hours=5, minutes=59)) == []
-    assert kinds([op(status="running")], end + timedelta(hours=6)) == ["autoclose"]
+    assert kinds([op(status="running")], end + timedelta(hours=6)) == []
     # an operation that never started closes without a start announcement
-    assert kinds([op()], end + timedelta(hours=7)) == ["autoclose"]
+    assert kinds([op()], end + timedelta(hours=7)) == ["start"]
 
 
 def test_finished_ops_ignored():

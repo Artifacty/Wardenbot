@@ -39,6 +39,7 @@ class SupplyView:
     name: str
     needed: int
     collected: int = 0
+    promised: int = 0
 
 
 @dataclass
@@ -55,6 +56,7 @@ class OpView:
     briefing_public: str
     status: str
     urgent: bool = False
+    signup_open: bool = True
     slots: list[SlotView] = field(default_factory=list)
     supply: list[SupplyView] = field(default_factory=list)
 
@@ -145,7 +147,7 @@ def _supply_field(items: list[SupplyView]) -> CardField | None:
     lines = []
     for it in items:
         pct = int(min(100, it.collected * 100 // it.needed)) if it.needed else 0
-        lines.append(f"{it.name}: {it.collected}/{it.needed} {progress_bar(it.collected, it.needed)} {pct}%")
+        lines.append(f"{it.name}: нужно {it.needed}, обещано {it.promised}, подготовлено {it.collected} {progress_bar(it.collected, it.needed)} {pct}%")
     return CardField("Снабжение", clip("\n".join(lines), FIELD_VALUE_MAX))
 
 
@@ -174,6 +176,8 @@ def build_card(op: OpView) -> Card:
         fields.append(supply)
 
     description = clip(op.briefing_public, DESCRIPTION_MAX) if op.briefing_public.strip() else ""
+    if not op.signup_open and op.status in (OPEN,RUNNING):
+        description = "**Набор закрыт**\n" + description
     if op.status == CANCELLED:
         description = "**Операция отменена**\n" + description
     elif op.status == DONE:

@@ -31,7 +31,7 @@ def test_admin_can_open_menu_and_create_without_verification_or_clan(native):
         assert can_admin(bot,user)
         assert await MenuView(2,'ru').interaction_check(i)
         await MenuCog.menu.callback(MenuCog(), i)
-        assert isinstance(i.response.send_message.call_args.kwargs['view'],MenuView)
+        assert isinstance(i.followup.send.call_args.kwargs['view'],MenuView)
         cog = OperationsCog(bot)
         await cog.create.callback(cog,i,app_commands.Choice(name='Наступление',value='offense'))
         assert i.response.send_modal.called
@@ -58,7 +58,7 @@ def test_admin_can_open_menu_and_create_without_verification_or_clan(native):
 
 def test_menu_has_no_language_selector():
     async def go():
-        assert [b.label for b in MenuView(1,'ru').children] == ['Создать операцию','Доска операций','Помощь']
+        assert [b.item.label for b in MenuView(1,'ru').children] == ['Создать операцию','Доска операций','Помощь']
         assert len(OperationOptions(1,'ru').children) == 2
     asyncio.run(go())
 

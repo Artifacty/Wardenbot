@@ -47,7 +47,7 @@ class Config:
     young_account_days: int = 14
     reject_cooldown_hours: int = 24
     # Operations.
-    briefing_open_minutes: int = 60
+    briefing_open_minutes: int = 45
     auto_close_hours: int = 6
 
 
@@ -92,6 +92,6 @@ def load_config(env: Mapping[str, str] | None = None, env_file: str | Path = ".e
         noshow_block_days=_int(merged, "NOSHOW_BLOCK_DAYS", 7),
         young_account_days=_int(merged, "YOUNG_ACCOUNT_DAYS", 14),
         reject_cooldown_hours=_int(merged, "REJECT_COOLDOWN_HOURS", 24),
-        briefing_open_minutes=_int(merged, "BRIEFING_OPEN_MINUTES", 60),
+        briefing_open_minutes=_int(merged, "BRIEFING_OPEN_MINUTES", 45),
         auto_close_hours=_int(merged, "AUTO_CLOSE_HOURS", 6),
     )

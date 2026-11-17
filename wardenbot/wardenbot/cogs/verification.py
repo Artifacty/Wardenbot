@@ -10,12 +10,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .. import repo, role_jobs
+from .. import repo, role_jobs, clans
 from ..bot import WardenBot
 from ..codeword import generate_code
 from ..i18n import user_language, parse_error_text, t
 from ..perms import can_screen
-from ..services import BLUE, audit, channel_mention, get_text_channel, reply, safe_dm, sync_member_roles, utcnow
+from ..services import interaction_errors, BLUE, audit, channel_mention, get_text_channel, reply, safe_dm, sync_member_roles, utcnow
 from ..steam import parse_steam
 from ..timeutil import ParseError, from_iso, to_iso
 
@@ -191,6 +191,7 @@ class ReviewButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:ver:
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str]):
         return cls(int(match["id"]), match["action"])
 
+    @interaction_errors
     async def callback(self, interaction: discord.Interaction) -> None:
         bot: WardenBot = interaction.client  # type: ignore[assignment]
         lang = "ru"
@@ -264,6 +265,9 @@ async def decide(
                 admitted_by=interaction.user.id, steam_key=req["steam_key"], steam_url=req["steam_url"],
                 ingame_name=req["ingame_name"], regiment=req["regiment"], language=req["language"],
             )
+            clan = clans.membership(conn,guild.id,uid)
+            if clan:
+                role_jobs.enqueue(conn,guild.id,uid,'clan',clan['duty'])
         elif status == "rejected":
             repo.user_update(conn, uid, now, status="rejected", last_reject_at=to_iso(now))
         if status in ("approved", "rejected"):

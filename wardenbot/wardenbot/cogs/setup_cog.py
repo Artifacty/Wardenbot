@@ -338,6 +338,14 @@ class SetupCog(commands.Cog):
         await self.post_panels(interaction.guild)
         await interaction.followup.send(t("setup_panels_done", lang), ephemeral=True)
 
+    @setup.command(name='sync', description='Повторно зарегистрировать slash-команды бота')
+    async def sync_commands(self,interaction:discord.Interaction):
+        if not isinstance(interaction.user,discord.Member) or not can_admin(self.bot,interaction.user):
+            await reply(interaction,'Нужны права Admin.'); return
+        await interaction.response.defer(ephemeral=True)
+        await self.bot._sync_commands(force=True)
+        await reply(interaction,'Команды синхронизированы. Глобальные изменения Discord могут появиться с задержкой.')
+
     @setup.command(name="status", description="Show what is configured · Показать состояние")
     async def setup_status(self, interaction: discord.Interaction) -> None:
         lang = "ru"
@@ -345,8 +353,13 @@ class SetupCog(commands.Cog):
         if guild is None or not isinstance(interaction.user, discord.Member) or not can_admin(self.bot, interaction.user):
             await reply(interaction, t("err_no_perm", lang))
             return
+        await interaction.response.defer(ephemeral=True)
         cfg = self.bot.cfg(guild.id)
-        lines = []
+        from pathlib import Path
+        counts=await self.bot.db.read(lambda c:(c.execute("SELECT COUNT(*) FROM notifications WHERE state='pending'").fetchone()[0],
+                    c.execute('SELECT COUNT(*) FROM role_jobs WHERE applied_revision<revision').fetchone()[0]))
+        lines = [f"БД: {Path(self.bot.db.path).resolve().name}; схема 7",f"Очереди: уведомления {counts[0]}, роли {counts[1]}",
+                 f"Message Content Intent: {self.bot.intents.message_content}"]
         for rd in ROLES:
             rid = cfg.get(f"role.{rd.key}")
             if not rid and rd.key in LEGACY_ROLE_KEYS:

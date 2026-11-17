@@ -201,6 +201,35 @@ MIGRATIONS: list[str] = [
         message_id INTEGER, source_deleted INTEGER NOT NULL DEFAULT 0
     );
     """,
+    # v7: operation revisions, delivery ledger and durable public notifications.
+    """
+    ALTER TABLE operations ADD COLUMN card_revision INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE operations ADD COLUMN card_applied INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE operations ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE operations ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Europe/Moscow';
+    ALTER TABLE operations ADD COLUMN signup_open INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE operations ADD COLUMN cancel_reason TEXT NOT NULL DEFAULT '';
+    ALTER TABLE operations ADD COLUMN publication_key TEXT;
+    CREATE UNIQUE INDEX op_publication_key ON operations(publication_key) WHERE publication_key IS NOT NULL;
+    CREATE TABLE supply_pledges (
+        op_id INTEGER NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+        supply_id INTEGER NOT NULL REFERENCES op_supply(id), user_id INTEGER NOT NULL,
+        amount INTEGER NOT NULL CHECK(amount >= 0), delivered INTEGER NOT NULL DEFAULT 0 CHECK(delivered >= 0),
+        PRIMARY KEY(supply_id,user_id), CHECK(delivered <= amount)
+    );
+    CREATE TABLE notifications (
+        id INTEGER PRIMARY KEY, op_id INTEGER NOT NULL REFERENCES operations(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL, revision INTEGER NOT NULL, content TEXT NOT NULL, recipients TEXT NOT NULL DEFAULT '[]',
+        state TEXT NOT NULL DEFAULT 'pending', message_id INTEGER, attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT, created_at TEXT NOT NULL, UNIQUE(op_id,kind,revision)
+    );
+    INSERT INTO notifications(op_id,kind,revision,content,state,created_at)
+        SELECT id,'remind60',1,'Legacy reminder','sent',created_at FROM operations WHERE reminder60_sent=1;
+    INSERT INTO notifications(op_id,kind,revision,content,state,created_at)
+        SELECT id,'remind15',1,'Legacy reminder','sent',created_at FROM operations WHERE reminder10_sent=1;
+
+    """,
+
 ]
 
 

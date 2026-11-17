@@ -213,6 +213,10 @@ def fake_interaction(user, guild_id=1, bot=None):
     inter.guild = SimpleNamespace(id=guild_id)
     inter.guild_id = guild_id
     inter.response.is_done.return_value = False
+    async def defer(**kwargs):
+        inter.response.is_done.return_value=True
+    inter.response.defer = AsyncMock(side_effect=defer)
+    inter.edit_original_response = AsyncMock()
     inter.response.send_message = AsyncMock()
     inter.response.edit_message = AsyncMock()
     inter.followup.send = AsyncMock()
@@ -227,6 +231,7 @@ def test_signup_flow_end_to_end_with_capacity():
         await bot.load_extension("wardenbot.cogs.operations")
         cog = bot.get_cog("OperationsCog")
         cog.tick.cancel()
+        cog.archive_tick.cancel()
         bot.cfg(1)["role.recruit"] = "500"
         now = datetime.now(UTC)
         op_id = await bot.db.write(
@@ -252,7 +257,7 @@ def test_signup_flow_end_to_end_with_capacity():
         view.select._values = [str(slots[0]["id"])]  # type: ignore[attr-defined]
         pick = make_interaction(fake_member(11, [500]))
         await view.chosen(pick)
-        assert "записаны" in pick.response.edit_message.call_args.kwargs["content"]
+        assert "записаны" in pick.edit_original_response.call_args.kwargs["content"]
 
         # the 1-seat slot is now full for the next user
         u2 = make_interaction(fake_member(12, [500]))
@@ -261,7 +266,7 @@ def test_signup_flow_end_to_end_with_capacity():
         view2.select._values = [str(slots[0]["id"])]  # type: ignore[attr-defined]
         pick2 = make_interaction(fake_member(12, [500]))
         await view2.chosen(pick2)
-        assert "заполнен" in pick2.response.edit_message.call_args.kwargs["content"]
+        assert "заполнен" in pick2.edit_original_response.call_args.kwargs["content"]
 
         # the closed briefing: not for strangers, not before T-60, yes for the organizer
         b1 = make_interaction(fake_member(11, [500]))
@@ -295,38 +300,20 @@ def test_signup_flow_end_to_end_with_capacity():
     run(go())
 
 
-def test_tick_actions_update_state_and_post():
+def test_tick_enqueues_delivery_and_never_auto_closes():
+    from wardenbot import notifications
     async def go():
-        bot = make_bot()
-        await bot.load_extension("wardenbot.cogs.operations")
-        cog = bot.get_cog("OperationsCog")
-        cog.tick.cancel()
-        now = datetime.now(UTC)
-        op_id = await bot.db.write(
-            lambda c: repo.op_create(
-                c, guild_id=1, organizer_id=99, title="Test", region="", type="offense", language="ru",
-                start_at=now + timedelta(minutes=30), duration_min=60, requirements="", briefing_public="",
-                briefing_closed="", slots=[SlotSpec("Inf", 5)], supply=[], now=now,
-            )
-        )
-        slot = (await bot.db.read(repo.op_slots, op_id))[0]
-        await bot.db.write(repo.signup, op_id, 11, slot["id"], now)
-        cog._say = AsyncMock()
-        cog.request_refresh = MagicMock()
-        row = await bot.db.read(repo.op_get, op_id)
-        await cog.run_action(operations.Action(op_id, "remind10"), row)
-        text, users = cog._say.call_args.args[1], cog._say.call_args.args[2]
-        assert users == [11] and "10" in text
-        row = await bot.db.read(repo.op_get, op_id)
-        assert row["reminder10_sent"] == 1 and row["reminder60_sent"] == 1
-        await cog.run_action(operations.Action(op_id, "start"), row)
-        assert (await bot.db.read(repo.op_get, op_id))["status"] == "running"
-        await cog.run_action(operations.Action(op_id, "autoclose"), row)
-        closed = await bot.db.read(repo.op_get, op_id)
-        assert closed["status"] == "done"
-        # an auto-closed operation confirms nobody's attendance
-        assert await bot.db.read(repo.attended_count, 11) == 0
-
+        bot=make_bot()
+        now=datetime.now(UTC)
+        op_id=await bot.db.write(lambda c:repo.op_create(c,guild_id=1,organizer_id=99,title='Test',region='',type='offense',language='ru',start_at=now+timedelta(minutes=15),duration_min=60,requirements='',briefing_public='',briefing_closed='',slots=[SlotSpec('Inf',5)],supply=[],now=now))
+        await bot.db.write(lambda c:repo.op_update(c,op_id,thread_id=123))
+        await bot.db.write(notifications.schedule,now)
+        jobs=await bot.db.read(notifications.pending)
+        assert [j['kind'] for j in jobs]==['remind15']
+        await bot.db.write(notifications.schedule,now+timedelta(days=3))
+        assert (await bot.db.read(repo.op_get,op_id))['status']=='running'
+        assert [j['kind'] for j in await bot.db.read(notifications.pending)]==['started']
+        bot.db.close()
     run(go())
 
 

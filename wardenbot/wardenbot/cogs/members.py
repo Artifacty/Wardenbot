@@ -59,6 +59,10 @@ class MembersCog(commands.Cog):
             return
         now = utcnow()
         def work(conn):
+            user=repo.user_get(conn,player.id)
+            if user is None or user['status']!='admitted':
+                from ..operation_service import OperationError
+                raise OperationError('Сначала допустите игрока через проверку или /member admit.')
             repo.user_update(conn, player.id, now, rank=rank.value)
             repo.role_job_set(conn, interaction.guild.id, player.id, rank.value)
         await self.bot.db.write(work)

@@ -45,7 +45,7 @@ def test_russian_interface_ignores_legacy_roles_and_client_locale(names,saved,st
         assert await user_language(i) == 'ru'
         if status == 'admitted':
             menu = MenuView(10,await user_language(i))
-            assert menu.children[0].label == 'Создать операцию'
+            assert menu.children[0].item.label == 'Создать операцию'
         bot.cfg(1)['ch.screening'] = '99'
         assert await user_language(i) == 'ru'
         bot.db.close()

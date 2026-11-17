@@ -1,4 +1,5 @@
 """Personal menu for the Russian community."""
+import re
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -6,7 +7,7 @@ from .. import repo
 from ..perms import can_staff
 from ..i18n import user_language, t
 from ..opsmeta import OP_TYPES
-from ..services import reply, channel_mention, report_error
+from ..services import interaction_errors, reply, channel_mention, report_error
 
 
 class PersonalView(discord.ui.View):
@@ -15,8 +16,8 @@ class PersonalView(discord.ui.View):
         self.owner_id = owner_id
 
     async def interaction_check(self, interaction):
-        user = await interaction.client.db.read(repo.user_get, interaction.user.id)
         staff = isinstance(interaction.user, discord.Member) and can_staff(interaction.client, interaction.user)
+        user = None if staff else await interaction.client.db.read(repo.user_get, interaction.user.id)
         if interaction.user.id != self.owner_id or (not staff and (not user or user['status'] != 'admitted')):
             await reply(interaction, t('err_no_perm', await user_language(interaction)))
             return False
@@ -52,41 +53,74 @@ class OperationOptions(PersonalView):
             app_commands.Choice(name=self.selected_type, value=self.selected_type))
 
 
-class MenuView(PersonalView):
-    def __init__(self, owner_id, lang):
-        super().__init__(owner_id)
-        for ru, en, handler in [('Создать операцию','Create operation',self.create),
-                                ('Доска операций','Operations board',self.board),
-                                ('Помощь','Help',self.help)]:
-            button = discord.ui.Button(label=ru if lang == 'ru' else en)
-            button.callback = handler
-            self.add_item(button)
+class MenuButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:menu:(?P<owner>\d+):(?P<action>create|board|help|verify)"):
+    LABELS = {'create': 'Создать операцию', 'board': 'Доска операций', 'help': 'Помощь', 'verify': 'Пройти проверку'}
 
-    async def create(self, interaction):
-        lang = await user_language(interaction)
-        await reply(interaction, 'Параметры операции' if lang == 'ru' else 'Operation options',
-                    view=OperationOptions(interaction.user.id, lang))
+    def __init__(self, owner, action):
+        super().__init__(discord.ui.Button(label=self.LABELS[action], custom_id=f'wb:menu:{owner}:{action}'))
+        self.owner, self.action = owner, action
 
-    async def board(self, interaction):
-        await reply(interaction, channel_mention(interaction.client, interaction.guild.id, 'ops_board'))
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match['owner']), match['action'])
 
-    async def help(self, interaction):
-        await reply(interaction, t('help_text', await user_language(interaction)))
+    @interaction_errors
+    async def callback(self, interaction):
+        if interaction.user.id != self.owner:
+            await reply(interaction, 'Откройте собственное меню командой /menu.')
+            return
+        if self.action == 'verify':
+            from .verification import begin_verification
+            await begin_verification(interaction)
+            return
+        await interaction.response.defer(ephemeral=True)
+        staff = isinstance(interaction.user, discord.Member) and can_staff(interaction.client, interaction.user)
+        user = None if staff else await interaction.client.db.read(repo.user_get, interaction.user.id)
+        if self.action != 'help' and not staff and (not user or user['status'] != 'admitted'):
+            await reply(interaction, 'Допуск отсутствует или отозван. Откройте /menu для проверки.')
+            return
+        if self.action == 'create':
+            await reply(interaction, 'Параметры операции', view=OperationOptions(self.owner, 'ru'))
+        elif self.action == 'board':
+            await reply(interaction, channel_mention(interaction.client, interaction.guild.id, 'ops_board'))
+        else:
+            await reply(interaction, t('help_text', 'ru'))
+
+    async def on_error(self, interaction, error):
+        await report_error(interaction.client, interaction, error, 'menu button')
+
+
+class MenuView(discord.ui.View):
+    def __init__(self, owner_id, lang='ru', admitted=True):
+        super().__init__(timeout=None)
+        self.owner_id = owner_id
+        for action in (('create', 'board', 'help') if admitted else ('verify', 'help')):
+            self.add_item(MenuButton(owner_id, action))
+
+    async def interaction_check(self, interaction):
+        return interaction.user.id == self.owner_id
 
 
 class MenuCog(commands.Cog):
-    @app_commands.command(name='menu', description='Open your personal menu')
+    async def cog_load(self):
+        self.bot.add_dynamic_items(MenuButton)
+
+    @app_commands.command(name='menu', description='Открыть персональное меню')
     @app_commands.guild_only()
-    async def menu(self, interaction):
-        user = await interaction.client.db.read(repo.user_get, interaction.user.id)
-        staff = isinstance(interaction.user, discord.Member) and can_staff(interaction.client, interaction.user)
-        if not staff and (not user or user['status'] != 'admitted'):
-            from .verification import build_verify_view
-            await reply(interaction, 'Сначала пройдите проверку.', view=build_verify_view())
+    async def menu(self, interaction: discord.Interaction):
+        # Discord requires an acknowledgement within 3 seconds, including on a busy SQLite DB.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            await reply(interaction, 'Меню доступно на сервере.')
             return
-        lang = await user_language(interaction)
-        await reply(interaction, 'Ваше меню' if lang == 'ru' else 'Your menu', view=MenuView(interaction.user.id, lang))
+        staff = can_staff(interaction.client, interaction.user)
+        user = None if staff else await interaction.client.db.read(repo.user_get, interaction.user.id)
+        admitted = staff or bool(user and user['status'] == 'admitted')
+        await reply(interaction, 'Ваше меню' if admitted else 'Для доступа к операциям пройдите проверку.',
+                    view=MenuView(interaction.user.id, admitted=admitted))
 
 
 async def setup(bot):
-    await bot.add_cog(MenuCog())
+    cog = MenuCog()
+    cog.bot = bot
+    await bot.add_cog(cog)

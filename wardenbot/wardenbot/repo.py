@@ -236,6 +236,7 @@ def op_create(
 
 
 OP_FIELDS = {
+    "revision", "timezone", "signup_open", "cancel_reason", "publication_key",
     "title", "region", "type", "language", "start_at", "duration_min", "requirements", "briefing_public",
     "briefing_closed", "status", "urgent", "forum_id", "thread_id", "message_id", "reminder60_sent",
     "reminder10_sent", "ended_at",
@@ -249,7 +250,7 @@ def op_update(conn: sqlite3.Connection, op_id: int, **fields: Any) -> None:
     if not fields:
         return
     assignments = ", ".join(f"{k}=?" for k in fields)
-    conn.execute(f"UPDATE operations SET {assignments} WHERE id=?", (*fields.values(), op_id))
+    conn.execute(f"UPDATE operations SET {assignments},card_revision=card_revision+1 WHERE id=?", (*fields.values(), op_id))
 
 
 def op_get(conn: sqlite3.Connection, op_id: int) -> Row | None:
@@ -296,7 +297,7 @@ def signup(
 ) -> SignupResult:
     """Sign a user up (or move them) atomically, respecting slot capacity."""
     op = op_get(conn, op_id)
-    if op is None or op["status"] not in ("open", "running"):
+    if op is None or op["status"] not in ("open", "running") or not op["signup_open"]:
         return SignupResult("closed")
     slot = conn.execute("SELECT * FROM op_slots WHERE id=? AND op_id=?", (slot_id, op_id)).fetchone()
     if slot is None:
@@ -307,6 +308,7 @@ def signup(
     taken = conn.execute("SELECT COUNT(*) FROM op_signups WHERE slot_id=?", (slot_id,)).fetchone()[0]
     if taken >= slot["capacity"]:
         return SignupResult("full", slot["name"])
+    card_touch(conn,op_id)
     late = int(op["status"] == "running")
     if existing is None:
         conn.execute(
@@ -324,11 +326,14 @@ def leave(conn: sqlite3.Connection, op_id: int, user_id: int) -> bool:
         "(SELECT 1 FROM operations WHERE id=? AND status IN ('open','running'))",
         (op_id, user_id, op_id),
     )
-    return cur.rowcount == 1
+    changed = cur.rowcount == 1
+    if changed: card_touch(conn,op_id)
+    return changed
 
 
 def supply_apply(conn: sqlite3.Connection, op_id: int, updates: dict[str, tuple[int, bool]]) -> None:
     """Apply {name: (amount, is_increment)} to an operation's supply list."""
+    card_touch(conn,op_id)
     for name, (amount, increment) in updates.items():
         if increment:
             conn.execute(
@@ -345,7 +350,8 @@ def op_finish(conn: sqlite3.Connection, op_id: int, now: datetime) -> list[int]:
     if op is None or op["status"] not in ("open", "running"):
         return []
     conn.execute("UPDATE operations SET status='done', ended_at=? WHERE id=?", (_now_iso(now), op_id))
-    rows = conn.execute("SELECT user_id FROM op_signups WHERE op_id=? AND attended=1 AND confirmed=1", (op_id,)).fetchall()
+    rows = conn.execute("SELECT user_id FROM op_signups WHERE op_id=? AND attended=1 AND confirmed=1 "
+                        "UNION SELECT user_id FROM supply_pledges WHERE op_id=? AND delivered>0", (op_id,op_id)).fetchall()
     return [r["user_id"] for r in rows]
 
 
@@ -377,10 +383,10 @@ def mark_noshow(conn: sqlite3.Connection, op_id: int, user_id: int) -> bool:
 
 def attended_count(conn: sqlite3.Connection, user_id: int) -> int:
     return conn.execute(
-        "SELECT COUNT(*) FROM op_signups s JOIN operations o ON o.id=s.op_id "
-        "WHERE s.user_id=? AND s.attended=1 AND s.confirmed=1 AND o.status='done'",
-        (user_id,),
-    ).fetchone()[0]
+        "SELECT COUNT(*) FROM operations o WHERE o.status='done' AND ("
+        "EXISTS(SELECT 1 FROM op_signups s WHERE s.op_id=o.id AND s.user_id=? AND s.attended=1 AND s.confirmed=1) OR "
+        "EXISTS(SELECT 1 FROM supply_pledges p WHERE p.op_id=o.id AND p.user_id=? AND p.delivered>0))",
+        (user_id,user_id)).fetchone()[0]
 
 
 def attendance_history(conn: sqlite3.Connection, user_id: int, limit: int) -> list[tuple[datetime, bool]]:
@@ -473,3 +479,15 @@ def confirm_attendance(conn, op_id: int, user_id: int, attended: bool) -> bool:
         "AND EXISTS (SELECT 1 FROM operations WHERE id=? AND status IN ('open','running','done'))",
         (int(attended), op_id, user_id, op_id))
     return cur.rowcount == 1
+
+
+def card_touch(conn,op_id):
+    conn.execute('UPDATE operations SET card_revision=card_revision+1 WHERE id=?',(op_id,))
+
+
+def dirty_cards(conn):
+    return conn.execute("SELECT id FROM operations WHERE card_revision>card_applied AND thread_id IS NOT NULL AND status IN ('open','running')").fetchall()
+
+
+def card_ack(conn,op_id,version):
+    conn.execute('UPDATE operations SET card_applied=MAX(card_applied,?) WHERE id=?',(version,op_id))

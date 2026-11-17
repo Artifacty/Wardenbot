@@ -27,6 +27,7 @@ EXTENSIONS = (
     "wardenbot.cogs.members",
     "wardenbot.cogs.selfroles",
     "wardenbot.cogs.menu",
+    "wardenbot.cogs.moderation",
     "wardenbot.cogs.clans",
     "wardenbot.cogs.housekeeping",
 )
@@ -73,7 +74,7 @@ class WardenBot(commands.Bot):
             await self.load_extension(ext)
         await self._sync_commands()
 
-    async def _sync_commands(self) -> None:
+    async def _sync_commands(self, force: bool = False) -> None:
         """Sync slash commands only when their definition changed (Discord rate-limits creation)."""
         from .command_locale import CommandTranslator
         if self.tree.translator is None:
@@ -81,18 +82,31 @@ class WardenBot(commands.Bot):
         payload = [await c.get_translated_payload(self.tree, self.tree.translator) for c in self.tree.get_commands()]
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
         scope = self.config.dev_guild_id or 0
-        stored = self.cfg(0).get(f"commands_hash.{scope}")
+        cache_key = f"commands_hash.{self.application_id}.{scope}"
+        stored = self.cfg(0).get(cache_key)
         guild = discord.Object(id=self.config.dev_guild_id) if self.config.dev_guild_id else None
+        old_scope=self.cfg(0).get(f'commands_scope.{self.application_id}')
+        legacy_scopes={int(k.split('.')[-1]) for k in self.cfg(0)
+                       if k.startswith('commands_hash.') and len(k.split('.'))==2 and k.split('.')[-1].isdigit()}
+        stale=({int(old_scope)} if old_scope and old_scope.isdigit() else legacy_scopes)-{0,scope}
+        for old in stale:
+            old_guild=discord.Object(id=old)
+            self.tree.clear_commands(guild=old_guild)
+            try:
+                await self.tree.sync(guild=old_guild)
+            except discord.HTTPException:
+                log.warning('Could not clear old command scope %s; retry with /setup sync',old)
         if guild is not None:
             self.tree.copy_global_to(guild=guild)
-        if stored == digest:
+        if stored == digest and not force:
             log.info("Slash commands unchanged; skipping sync")
             return
         if guild is not None:
             synced = await self.tree.sync(guild=guild)
         else:
             synced = await self.tree.sync()
-        await self.set_cfg(0, f"commands_hash.{scope}", digest)
+        await self.set_cfg(0, cache_key, digest)
+        await self.set_cfg(0,f'commands_scope.{self.application_id}',scope)
         log.info("Synced %d slash commands (%s)", len(synced), "dev guild" if scope else "global")
 
     async def on_ready(self) -> None:
@@ -100,5 +114,10 @@ class WardenBot(commands.Bot):
 
     async def _on_tree_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         original = getattr(error, "original", error)
+        from .operation_service import OperationError
+        if isinstance(original, OperationError):
+            from .services import reply
+            await reply(interaction, str(original))
+            return
         name = interaction.command.qualified_name if interaction.command else "?"
         await report_error(self, interaction, original, f"/{name}")

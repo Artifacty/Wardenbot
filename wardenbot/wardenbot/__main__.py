@@ -8,6 +8,7 @@ import sys
 from .bot import WardenBot
 from .config import ConfigError, load_config
 from .db import Database
+from .instance_lock import instance_lock
 
 
 def main() -> int:
@@ -20,12 +21,17 @@ def main() -> int:
         level=getattr(logging, config.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
-    db = Database(config.db_path)
-    bot = WardenBot(config, db)
     try:
-        bot.run(config.token, log_handler=None)
-    finally:
-        db.close()
+        with instance_lock(config.db_path):
+            db = Database(config.db_path)
+            bot = WardenBot(config, db)
+            try:
+                bot.run(config.token, log_handler=None)
+            finally:
+                db.close()
+    except RuntimeError as exc:
+        print(f"Startup error: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
+import uuid
+from functools import wraps
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -137,14 +140,17 @@ async def reply(interaction: discord.Interaction, content: str | None = None, **
 
 async def report_error(bot: "WardenBot", interaction: discord.Interaction | None, error: BaseException, where: str) -> None:
     """Log an unexpected error, tell the user briefly and notify the bot-admin channel."""
-    log.error("Unhandled error in %s (%s)", where, type(error).__name__)
+    error_id = uuid.uuid4().hex[:8]
+    frames = ' -> '.join(f'{f.filename}:{f.lineno} {f.name}' for f in traceback.extract_tb(error.__traceback__))
+    log.error("Error %s in %s: %s HTTP=%s Discord=%s; %s", error_id, where, type(error).__name__,
+              getattr(error, 'status', None), getattr(error, 'code', None), frames)
     if interaction is not None:
         try:
             language = await user_language(interaction)
         except Exception:
             language = "ru"  # Error reporting must still work when storage is unavailable.
         try:
-            await reply(interaction, t("err_generic", language))
+            await reply(interaction, t("err_generic", language) + f" Код: {error_id}.")
         except discord.HTTPException:
             pass
         guild = interaction.guild
@@ -152,7 +158,7 @@ async def report_error(bot: "WardenBot", interaction: discord.Interaction | None
             channel = get_text_channel(bot, guild, "bot_admin")
             if isinstance(channel, discord.TextChannel):
                 try:
-                    await channel.send(f"Ошибка в `{where}`: `{type(error).__name__}`. Проверьте состояние бота.")
+                    await channel.send(f"Ошибка `{error_id}` в `{where}`: `{type(error).__name__}`, Discord `{getattr(error, 'code', None)}`. Подробности в журнале бота.")
                 except discord.HTTPException:
                     pass
 
@@ -210,3 +216,18 @@ async def sync_aux_roles(bot, guild, user_id, scope):
         await bot.db.write(role_jobs.acknowledge, job)
         current = await bot.db.read(role_jobs.get, guild.id, user_id, scope)
         return current['applied_revision'] == current['revision']
+
+
+def interaction_errors(fn):
+    """DynamicItem callbacks do not use View.on_error; handle their errors explicitly."""
+    @wraps(fn)
+    async def wrapper(self, interaction, *args, **kwargs):
+        try:
+            return await fn(self,interaction,*args,**kwargs)
+        except Exception as exc:
+            from .operation_service import OperationError
+            if isinstance(exc, OperationError):
+                await reply(interaction,str(exc))
+            else:
+                await report_error(interaction.client,interaction,exc,type(self).__name__)
+    return wrapper

@@ -14,7 +14,7 @@ from ..bot import WardenBot
 from ..i18n import user_language, t
 from ..layout import ROLE_BY_KEY
 from ..perms import can_staff
-from ..services import get_role, report_error, reply, utcnow, sync_aux_roles
+from ..services import interaction_errors, get_role, report_error, reply, utcnow, sync_aux_roles
 
 log = logging.getLogger(__name__)
 SELF_ROLES = ("ping_ops", "ping_logi")
@@ -36,6 +36,7 @@ class RoleButton(discord.ui.DynamicItem[discord.ui.Button], template=r"wb:role:(
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str]):
         return cls(match["key"])
 
+    @interaction_errors
     async def callback(self, interaction: discord.Interaction) -> None:
         bot: WardenBot = interaction.client  # type: ignore[assignment]
         lang = await user_language(interaction)

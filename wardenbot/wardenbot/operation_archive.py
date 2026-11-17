@@ -61,6 +61,8 @@ class OperationArchiver:
                     'card': card_embed(build_card(view)).to_dict(),
                     'operation': {k: op[k] for k in ('id','title','region','type','language','organizer_id',
                         'start_at','duration_min','requirements','briefing_public','status','ended_at')},
+                    'cancel_reason': op['cancel_reason'],
+                    'deliveries': [dict(r) for r in await self.bot.db.read(lambda c:c.execute('SELECT * FROM supply_pledges WHERE op_id=?',(op['id'],)).fetchall())],
                     'slots': [dict(r) for r in await self.bot.db.read(repo.op_slots, op['id'])],
                     'supply': [dict(r) for r in await self.bot.db.read(repo.op_supply, op['id'])],
                     'signups': [dict(row) for row in signups],
@@ -88,7 +90,8 @@ class OperationArchiver:
                 embed = discord.Embed.from_dict(payload['card'])
                 embed.set_footer(text=marker)
                 message = await channel.send(
-                    content=f"Архив операции #{op['id']}. Состав и обсуждение — в файле JSON.gz.",
+                    content=f"Архив операции #{op['id']}. Состав и обсуждение — в файле JSON.gz." +
+                            ('\nПричина отмены: '+payload['cancel_reason'] if payload.get('cancel_reason') else ''),
                     embed=embed, file=discord.File(io.BytesIO(data), filename=f"operation-{op['id']}.json.gz"),
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
