@@ -145,6 +145,8 @@ async def discord_fixture(path=':memory:'):
         players[uid] = member
     guild.members = list(players.values())
     guild.me = players[999]
+    from wardenbot.invite import required_permissions
+    guild.me.guild_permissions = required_permissions()
     guild.get_member.side_effect = players.get
     guild.get_role.side_effect = lambda rid: staff if rid == 77 else None
     channels, next_id = {}, 100
@@ -161,6 +163,7 @@ async def discord_fixture(path=':memory:'):
         cls = discord.CategoryChannel if is_category else discord.TextChannel if 'topic' in kwargs else discord.VoiceChannel
         ch = MagicMock(spec=cls)
         ch.id, ch.name, ch.mention = next_id, name, f'<#{next_id}>'
+        ch.permissions_for.return_value = guild.me.guild_permissions
         ch.overwrites = kwargs.get('overwrites', {})
         ch.topic, ch.members, ch.channels = kwargs.get('topic'), [], []
         async def edit(**changes):

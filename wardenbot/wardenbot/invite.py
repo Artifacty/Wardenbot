@@ -20,6 +20,7 @@ from .perm_layout import category_overwrites, channel_overwrites
 BASE = (
     "manage_roles", "manage_channels", "manage_guild", "manage_messages", "manage_threads",
     "moderate_members", "kick_members", "ban_members", "view_audit_log", "move_members",
+    "connect", "speak",
 )
 
 

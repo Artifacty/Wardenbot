@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import re
+import time
 
 import discord
 from discord.ext import commands, tasks
@@ -105,6 +106,8 @@ class CommunityCog(commands.Cog):
         self.bot, self.lock = bot, asyncio.Lock()
         # Avoid re-fetching unchanged posts on every reconciliation tick. Reset on restart.
         self.synced = {}
+        self.retry_after = {}
+
 
     async def cog_load(self):
         self.bot.add_dynamic_items(Button)
@@ -123,7 +126,7 @@ class CommunityCog(commands.Cog):
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True,
-                manage_messages=True, read_message_history=True, connect=True, move_members=True),
+                manage_messages=True, read_message_history=True, connect=True),
         }
         for key in ('command', 'staff'):
             rid = self.bot.cfg(guild.id).get('role.' + key)
@@ -147,13 +150,31 @@ class CommunityCog(commands.Cog):
         return [uid for uid in users if uid in admitted or
                 ((member := guild.get_member(uid)) and can_staff(self.bot, member))]
 
+    def check_channel_permissions(self, guild, overwrites):
+        """Discord rejects creation if the bot tries to grant permissions it does not hold."""
+        actual = guild.me.guild_permissions
+        if actual.administrator:
+            return
+        needed = discord.Permissions(manage_channels=True, manage_roles=True)
+        for overwrite in overwrites.values():
+            allow, _ = overwrite.pair()
+            needed |= allow
+        missing = [name for name, enabled in needed if enabled and not getattr(actual, name)]
+        if missing:
+            raise OperationError(
+                f'Боту на сервере {guild.id} не хватает прав: {", ".join(missing)}. '
+                'Обновите права роли бота через ссылку python -m wardenbot.invite APPLICATION_ID, '
+                'затем выполните /setup run. Ваши личные права администратора не заменяют права бота.')
+
     async def category(self, guild, key, name):
         stored = self.bot.cfg(guild.id).get('cat.' + key)
         found = guild.get_channel(int(stored)) if stored and stored.isdigit() else None
         if found is None:
             found = discord.utils.get(guild.categories, name=name)
         if found is None:
-            found = await guild.create_category(name, overwrites=self.permissions(guild, []))
+            overwrites = self.permissions(guild, [])
+            self.check_channel_permissions(guild, overwrites)
+            found = await guild.create_category(name, overwrites=overwrites)
         if str(found.id) != stored:
             await self.bot.set_cfg(guild.id, 'cat.' + key, found.id)
         return found
@@ -180,6 +201,7 @@ class CommunityCog(commands.Cog):
         if channel is None:
             if closed:
                 return None
+            self.check_channel_permissions(guild, perms)
             if is_text:
                 channel = await guild.create_text_channel(name, category=category, topic=marker, overwrites=perms)
             else:
@@ -195,6 +217,10 @@ class CommunityCog(commands.Cog):
         if not is_text:
             for member in list(channel.members):
                 if member.id != guild.me.id and not can_staff(self.bot, member) and (closed or member.id not in users):
+                    if not channel.permissions_for(guild.me).move_members:
+                        raise OperationError(
+                            'Доступ к войсу закрыт, но для отключения уже подключённого игрока '
+                            'боту нужно право «Перемещать участников» (move_members).')
                     await member.move_to(None, reason='Доступ к группе или операции отозван')
         if not stored or stored[0] != channel.id:
             await self.bot.db.write(lambda conn: conn.execute(
@@ -214,6 +240,7 @@ class CommunityCog(commands.Cog):
                 if role:
                     overwrites[role] = discord.PermissionOverwrite(view_channel=True, read_message_history=True, send_messages=False)
             if support is None:
+                self.check_channel_permissions(guild, overwrites)
                 support = await guild.create_text_channel('помощь-и-отзывы', overwrites=overwrites)
             else:
                 await support.edit(name='помощь-и-отзывы', overwrites=overwrites)
@@ -300,6 +327,12 @@ class CommunityCog(commands.Cog):
         if not op or not op['thread_id'] or (guild := self.bot.get_guild(op['guild_id'])) is None:
             return
         closed = op['status'] not in ('open', 'running')
+        if closed:
+            existing = await self.bot.db.read(lambda conn: conn.execute(
+                "SELECT 1 FROM activity_rooms WHERE guild_id=? AND source='operation' AND source_id=? LIMIT 1",
+                (guild.id, op_id)).fetchone())
+            if existing is None:
+                return
         users = [op['organizer_id']]
         if not closed:
             users += [s['user_id'] for s in await self.bot.db.read(repo.op_signups, op_id)]
@@ -308,22 +341,44 @@ class CommunityCog(commands.Cog):
         for role in ('подготовка', 'Войс 1', 'Войс 2'):
             await self.room(guild, 'operation', op_id, role, op['title'], users, category, closed)
 
+    async def retry_job(self, kind, row, action):
+        """Back off individual denied jobs; other guilds and operations keep working."""
+        key = (kind, row['id'])
+        guild = self.bot.get_guild(row['guild_id'])
+        if guild is None or guild.me is None:
+            return
+        permissions = guild.me.guild_permissions.value
+        previous = self.retry_after.get(key)
+        if previous and previous[0] > time.monotonic() and previous[1] == permissions:
+            return
+        try:
+            await action(row['id'])
+        except (discord.Forbidden, OperationError) as error:
+            self.retry_after[key] = (time.monotonic() + 300, permissions)
+            if isinstance(error, discord.Forbidden):
+                log.warning(
+                    'Server %s: %s %s denied by Discord (403, code %s). '
+                    'Check bot role permissions and category/channel overrides; '
+                    'update the invite with python -m wardenbot.invite APPLICATION_ID. Retry in 5 minutes.',
+                    guild.id, kind, row['id'], error.code)
+            else:
+                log.warning('Server %s: %s %s: %s Retry in 5 minutes.', guild.id, kind, row['id'], error)
+        except Exception:
+            log.exception('%s %s awaits retry', kind, row['id'])
+        else:
+            self.retry_after.pop(key, None)
+
     @tasks.loop(seconds=30)
     async def reconcile(self):
         try:
             async with self.lock:
-                rows = await self.bot.db.read(lambda conn: conn.execute('SELECT id FROM community_posts').fetchall())
+                rows = await self.bot.db.read(lambda conn: conn.execute('SELECT id,guild_id FROM community_posts').fetchall())
                 for row in rows:
-                    try:
-                        await self._post(row['id'])
-                    except Exception:
-                        log.exception('Community post %s awaits retry', row['id'])
-                operations = await self.bot.db.read(lambda conn: conn.execute('SELECT id FROM operations WHERE thread_id IS NOT NULL').fetchall())
+                    await self.retry_job('Community post', row, self._post)
+                operations = await self.bot.db.read(lambda conn: conn.execute(
+                    'SELECT id,guild_id FROM operations WHERE thread_id IS NOT NULL').fetchall())
                 for op in operations:
-                    try:
-                        await self._operation_rooms(op['id'])
-                    except Exception:
-                        log.exception('Operation rooms %s await retry', op['id'])
+                    await self.retry_job('Operation rooms', op, self._operation_rooms)
         except Exception:
             log.exception('Community reconciliation awaits retry')
 
