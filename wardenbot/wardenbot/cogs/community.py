@@ -17,13 +17,17 @@ log = logging.getLogger(__name__)
 
 class Form(discord.ui.Modal):
     def __init__(self, kind, record=None):
-        super().__init__(title='Небольшая группа · начинаем сейчас' if kind == 'group' else 'Помощь или отзыв')
-        self.kind, self.pid = kind, record['id'] if record else None
+        ticket_type = 'complaint' if kind == 'complaint' else 'question'
+        title = 'Небольшая группа · начинаем сейчас' if kind == 'group' else (
+            'Жалоба модерации' if ticket_type == 'complaint' else 'Вопрос модерации')
+        super().__init__(title=title)
+        self.ticket_type = ticket_type
+        self.kind, self.pid = 'group' if kind == 'group' else 'ticket', record['id'] if record else None
         self.title_input = discord.ui.TextInput(
             label='Краткое название', max_length=70, default=record['title'] if record else None,
-            placeholder='Два танка на вылазку' if kind == 'group' else 'Нужна помощь с доступом')
+            placeholder='Два танка на вылазку' if kind == 'group' else 'На что или кого жалоба?' if ticket_type == 'complaint' else 'Нужна помощь с доступом')
         self.body = discord.ui.TextInput(
-            label='Что планируем?' if kind == 'group' else 'Опишите вопрос или отзыв',
+            label='Что планируем?' if kind == 'group' else 'Что произошло? Добавьте ссылки' if ticket_type == 'complaint' else 'Опишите ваш вопрос',
             style=discord.TextStyle.paragraph, max_length=500 if kind == 'group' else 1000,
             default=record['body'] if record else None)
         self.add_item(self.title_input)
@@ -51,7 +55,7 @@ class Form(discord.ui.Modal):
                 pid = self.pid
             else:
                 pid = await cog.bot.db.write(data.create, guild, owner, self.kind,
-                                             self.title_input.value, self.body.value, capacity, staff, str(interaction.id))
+                                             self.title_input.value, self.body.value, capacity, staff, str(interaction.id), self.ticket_type)
             await reply(interaction, 'Сохранено. Обновляю чат и карточку; при сбое бот повторит попытку автоматически.')
             await cog._post(pid)
         row = await cog.bot.db.read(data.get, pid)
@@ -60,13 +64,13 @@ class Form(discord.ui.Modal):
 
 
 class Button(discord.ui.DynamicItem[discord.ui.Button],
-             template=r'wb:community:(?P<id>\d+):(?P<action>ticket|group|join|leave|edit|close)'):
+             template=r'wb:community:(?P<id>\d+):(?P<action>ticket|question|complaint|group|join|leave|edit|close)'):
     def __init__(self, pid, action):
-        labels = {'ticket': 'Помощь / оставить отзыв', 'group': 'Собрать небольшую группу',
+        labels = {'ticket': 'Вопрос', 'question': 'Вопрос', 'complaint': 'Жалоба', 'group': 'Собрать небольшую группу',
                   'join': 'Присоединиться', 'leave': 'Выйти', 'edit': 'Изменить', 'close': 'Завершить / закрыть'}
         super().__init__(discord.ui.Button(
             label=labels[action], custom_id=f'wb:community:{pid}:{action}',
-            style=discord.ButtonStyle.primary if action in ('group', 'ticket', 'join') else discord.ButtonStyle.secondary))
+            style=discord.ButtonStyle.primary if action in ('group', 'ticket', 'question', 'complaint', 'join') else discord.ButtonStyle.secondary))
         self.pid, self.action = pid, action
 
     @classmethod
@@ -78,7 +82,7 @@ class Button(discord.ui.DynamicItem[discord.ui.Button],
         cog = interaction.client.get_cog('CommunityCog')
         if not interaction.guild or not isinstance(interaction.user, discord.Member):
             raise OperationError('Откройте кнопку на сервере.')
-        if self.action in ('ticket', 'group', 'edit'):
+        if self.action in ('ticket', 'question', 'complaint', 'group', 'edit'):
             await cog.check(interaction)
             record = None
             if self.action == 'edit':
@@ -190,13 +194,18 @@ class CommunityCog(commands.Cog):
             except discord.NotFound:
                 pass
         name = f'{title[:55]} {role} · {pid}'
-        is_text = role in ('подготовка', 'тикет')
+        is_text = role == 'тикет'
         if is_text:
             name = re.sub(r'[^\w-]+', '-', name.lower()).strip('-')
         marker = f'wardenbot:{source}:{pid}:{role}'
         if channel is None:
             channel = next((c for c in category.channels if getattr(c, 'topic', None) == marker or
                             c.name == name or (not is_text and c.name.endswith(f' {role} · {pid}'))), None)
+        if source == 'operation' and role == 'подготовка' and isinstance(channel, discord.TextChannel):
+            # Discord cannot convert a text channel to voice. Delete only the tracked/marked old room.
+            await self.delete_room(guild, source, pid, channel)
+            channel = None
+            stored = None
         perms = self.permissions(guild, users, closed)
         if channel is None:
             if closed:
@@ -228,11 +237,62 @@ class CommunityCog(commands.Cog):
                 (guild.id, source, pid, role, channel.id)))
         return channel
 
+    async def delete_room(self, guild, source, pid, channel):
+        try:
+            await channel.delete(reason='Операция завершена или комната подготовки заменяется голосовой')
+        except discord.NotFound:
+            pass
+        await self.bot.db.write(lambda conn: conn.execute(
+            'DELETE FROM activity_rooms WHERE guild_id=? AND source=? AND source_id=? AND channel_id=?',
+            (guild.id, source, pid, channel.id)))
+
+    async def delete_rooms(self, guild, source, pid):
+        """Terminal state is the durable deletion job, including lost creation/deletion receipts."""
+        rows = await self.bot.db.read(lambda conn: conn.execute(
+            'SELECT * FROM activity_rooms WHERE guild_id=? AND source=? AND source_id=?',
+            (guild.id, source, pid)).fetchall())
+        channels = {}
+        failures = []
+        for row in rows:
+            channel = guild.get_channel(row['channel_id'])
+            if channel is None:
+                try:
+                    channel = await guild.fetch_channel(row['channel_id'])
+                except discord.NotFound:
+                    await self.bot.db.write(lambda conn, cid=row['channel_id']: conn.execute(
+                        'DELETE FROM activity_rooms WHERE guild_id=? AND source=? AND source_id=? AND channel_id=?',
+                        (guild.id, source, pid, cid)))
+                    continue
+                except discord.HTTPException as error:
+                    failures.append(error)
+                    continue
+            channels[channel.id] = channel
+        key = 'operation_rooms' if source == 'operation' else 'small_groups'
+        stored = self.bot.cfg(guild.id).get('cat.' + key)
+        category = guild.get_channel(int(stored)) if stored and stored.isdigit() else None
+        if category is None:
+            name = 'Каналы операций' if source == 'operation' else 'Небольшие группы'
+            category = discord.utils.get(guild.categories, name=name)
+        if isinstance(category, discord.CategoryChannel):
+            roles = ('подготовка', 'Войс 1', 'Войс 2') if source == 'operation' else ('Сбор',)
+            for channel in category.channels:
+                if any(getattr(channel, 'topic', None) == f'wardenbot:{source}:{pid}:{role}' or
+                       (isinstance(channel, discord.VoiceChannel) and channel.name.endswith(f' {role} · {pid}'))
+                       for role in roles):
+                    channels[channel.id] = channel
+        for channel in channels.values():
+            try:
+                await self.delete_room(guild, source, pid, channel)
+            except Exception as error:
+                failures.append(error)
+        if failures:
+            raise failures[0]
+
     async def panels(self, guild):
         async with self.lock:
             support = get_text_channel(self.bot, guild, 'support')
             if support is None:
-                support = discord.utils.get(guild.text_channels, name='помощь-и-отзывы')
+                support = next((ch for ch in guild.text_channels if ch.name in ('вопросы-и-жалобы', 'помощь-и-отзывы')), None)
             overwrites = self.permissions(guild, [])
             for key in ('recruit', 'private', 'sergeant'):
                 rid = self.bot.cfg(guild.id).get('role.' + key)
@@ -241,19 +301,19 @@ class CommunityCog(commands.Cog):
                     overwrites[role] = discord.PermissionOverwrite(view_channel=True, read_message_history=True, send_messages=False)
             if support is None:
                 self.check_channel_permissions(guild, overwrites)
-                support = await guild.create_text_channel('помощь-и-отзывы', overwrites=overwrites)
+                support = await guild.create_text_channel('вопросы-и-жалобы', overwrites=overwrites)
             else:
-                await support.edit(name='помощь-и-отзывы', overwrites=overwrites)
+                await support.edit(name='вопросы-и-жалобы', overwrites=overwrites)
             await self.bot.set_cfg(guild.id, 'ch.support', support.id)
             setup = self.bot.get_cog('SetupCog')
             panels = [
-                ('support', support, 'ticket', 'Нужна помощь или хотите оставить отзыв? Создайте приватный чат с модерацией.'),
-                ('lfg', get_text_channel(self.bot, guild, 'lfg'), 'group',
+                ('support', support, ['question', 'complaint'], 'Выберите «Вопрос» или «Жалоба»: откроется приватный чат с модерацией. Идеи публикуйте в форуме «предложения» в категории «ШТАБ».'),
+                ('lfg', get_text_channel(self.bot, guild, 'lfg'), ['group'],
                  'Соберите небольшую группу прямо сейчас: короткая форма, запись и отдельный войс. Вы уже включены в число участников.'),
             ]
             for key, channel, action, description in panels:
                 if isinstance(channel, discord.TextChannel):
-                    await setup._upsert(guild, key, channel, embeds=[discord.Embed(description=description, color=0x2F6FB5)], view=view(0, [action]))
+                    await setup._upsert(guild, key, channel, embeds=[discord.Embed(description=description, color=0x2F6FB5)], view=view(0, action))
 
     async def post(self, pid):
         async with self.lock:
@@ -274,17 +334,22 @@ class CommunityCog(commands.Cog):
                                       await self.admitted_users(guild, users), category, closed)
             if channel is None:
                 return
-            description = row['body'] + f"\nАвтор: <@{row['owner_id']}>"
+            topic = 'Жалоба' if row['ticket_type'] == 'complaint' else 'Вопрос'
+            description = f"**{topic}**\n{row['body']}\nАвтор: <@{row['owner_id']}>"
         else:
-            category = await self.category(guild, 'small_groups', 'Небольшие группы')
-            allowed = await self.admitted_users(guild, users)
-            voice = await self.room(guild, 'group', pid, 'Сбор', row['title'], allowed, category, closed)
+            voice = None
+            if closed:
+                await self.delete_rooms(guild, 'group', pid)
+            else:
+                category = await self.category(guild, 'small_groups', 'Небольшие группы')
+                allowed = await self.admitted_users(guild, users)
+                voice = await self.room(guild, 'group', pid, 'Сбор', row['title'], allowed, category)
             channel = get_text_channel(self.bot, guild, 'lfg')
             if not channel:
                 raise OperationError('Не найден канал поиска группы. Администратору нужно выполнить /setup run.')
             if not voice and not closed:
                 return
-            voice_text = voice.mention if voice else 'закрыт'
+            voice_text = voice.mention if voice else 'удалён — группа завершена'
             description = (f"{row['body']}\nВойс: {voice_text}\nАвтор: <@{row['owner_id']}>\n"
                            f"Участники {len(users)}/{row['capacity']}: " + ' '.join(f'<@{uid}>' for uid in users))
         title = ('Закрыто · ' if closed else 'Идёт сейчас · ' if row['kind'] == 'group' else '') + row['title']
@@ -328,11 +393,8 @@ class CommunityCog(commands.Cog):
             return
         closed = op['status'] not in ('open', 'running')
         if closed:
-            existing = await self.bot.db.read(lambda conn: conn.execute(
-                "SELECT 1 FROM activity_rooms WHERE guild_id=? AND source='operation' AND source_id=? LIMIT 1",
-                (guild.id, op_id)).fetchone())
-            if existing is None:
-                return
+            await self.delete_rooms(guild, 'operation', op_id)
+            return
         users = [op['organizer_id']]
         if not closed:
             users += [s['user_id'] for s in await self.bot.db.read(repo.op_signups, op_id)]

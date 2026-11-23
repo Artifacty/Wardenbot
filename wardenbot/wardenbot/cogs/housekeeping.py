@@ -29,15 +29,18 @@ class HousekeepingCog(commands.Cog):
     @tasks.loop(hours=1)
     async def promotions(self) -> None:
         """Reconcile ranks from confirmed attendance totals."""
-        users = await self.bot.db.read(repo.users_with_rank, ("recruit", "private", "sergeant"))
-        for guild in self.bot.guilds:
-            for row in users:
-                if guild.get_member(row["discord_id"]) is None:
-                    continue
-                try:
-                    await evaluate_member(self.bot, guild, row["discord_id"])
-                except Exception:  # noqa: BLE001
-                    log.exception("promotion check failed for %s", row["discord_id"])
+        try:
+            users = await self.bot.db.read(repo.users_with_rank, ("recruit", "private", "sergeant"))
+            for guild in self.bot.guilds:
+                for row in users:
+                    if guild.get_member(row["discord_id"]) is None:
+                        continue
+                    try:
+                        await evaluate_member(self.bot, guild, row["discord_id"])
+                    except Exception:  # noqa: BLE001
+                        log.exception("promotion check failed for %s", row["discord_id"])
+        except Exception:
+            log.exception("Promotion cycle failed; will retry")
 
     @promotions.before_loop
     async def _before(self) -> None:
@@ -45,22 +48,25 @@ class HousekeepingCog(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def role_sync(self) -> None:
-        for job in await self.bot.db.read(repo.role_jobs_pending):
-            guild = self.bot.get_guild(job['guild_id'])
-            if guild is None:
-                continue
-            try:
-                await sync_member_roles(self.bot, guild, job['user_id'])
-            except Exception:
-                log.exception("Role synchronization failed for %s", job['user_id'])
-
-        for job in await self.bot.db.read(role_jobs.pending):
-            guild = self.bot.get_guild(job['guild_id'])
-            if guild is not None:
+        try:
+            for job in await self.bot.db.read(repo.role_jobs_pending):
+                guild = self.bot.get_guild(job['guild_id'])
+                if guild is None:
+                    continue
                 try:
-                    await sync_aux_roles(self.bot, guild, job['user_id'], job['scope'])
+                    await sync_member_roles(self.bot, guild, job['user_id'])
                 except Exception:
-                    log.exception("Auxiliary role synchronization failed for %s", job['user_id'])
+                    log.exception("Role synchronization failed for %s", job['user_id'])
+
+            for job in await self.bot.db.read(role_jobs.pending):
+                guild = self.bot.get_guild(job['guild_id'])
+                if guild is not None:
+                    try:
+                        await sync_aux_roles(self.bot, guild, job['user_id'], job['scope'])
+                    except Exception:
+                        log.exception("Auxiliary role synchronization failed for %s", job['user_id'])
+        except Exception:
+            log.exception("Role synchronization cycle failed; will retry")
 
     @role_sync.before_loop
     async def _before_roles(self) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -34,6 +35,8 @@ def read_text(name: str) -> str:
 class SetupCog(commands.Cog):
     def __init__(self, bot: WardenBot) -> None:
         self.bot = bot
+        self.guild_locks = {}
+        self.panel_locks = {}
 
     setup = app_commands.Group(
         name="setup", description="Set up the server · Настройка сервера",
@@ -110,6 +113,11 @@ class SetupCog(commands.Cog):
         stored = cfg.get(f"cat.{cat.key}")
         if stored and stored.isdigit():
             existing = guild.get_channel(int(stored))
+        if existing is None:
+            existing = next((item for item in guild.categories if item.name in (
+                cat.name, f"{cat.number} // {cat.ru} · {cat.en} {cat.emoji}")), None)
+            if existing is not None:
+                await self.bot.set_cfg(guild.id, f"cat.{cat.key}", existing.id)
         overwrites = self._target_overwrites(category_overwrites(cat), roles, guild)
         if isinstance(existing, discord.CategoryChannel):
             changes = {"name": cat.name, "reason": "Русское название категории"}
@@ -132,8 +140,18 @@ class SetupCog(commands.Cog):
         stored = cfg.get(f"ch.{ch.key}")
         if stored and stored.isdigit():
             existing = guild.get_channel(int(stored))
+        if existing is None:
+            candidates = guild.channels if ch.key == "feedback" else category.channels
+            existing = next((item for item in candidates if item.name == name), None)
+            if existing is not None:
+                await self.bot.set_cfg(guild.id, f"ch.{ch.key}", existing.id)
         overwrites = self._target_overwrites(channel_overwrites(ch), roles, guild)
         if existing is not None:
+            if ch.key == "feedback":
+                # Move the registered forum, keeping its ID and existing discussion threads.
+                await existing.edit(name=name, category=category, overwrites=overwrites,
+                                    topic=ch.guidelines, reason="Форум предложений в ШТАБЕ")
+                return existing
             # Trading channels and their configured permissions are explicitly preserved.
             if ch.key in ("sell", "buy", "services"):
                 await existing.edit(name=name, reason="Русское название")
@@ -227,17 +245,29 @@ class SetupCog(commands.Cog):
         self, guild: discord.Guild, cfg_key: str, channel: discord.TextChannel, *,
         embeds: list[discord.Embed], view: discord.ui.View | None = None,
     ) -> discord.Message:
-        stored = self.bot.cfg(guild.id).get(f"msg.{cfg_key}")
-        if stored and stored.isdigit():
-            try:
-                msg = await channel.fetch_message(int(stored))
-                await msg.edit(embeds=embeds, view=view)
-                return msg
-            except discord.NotFound:
-                pass
-        msg = await channel.send(embeds=embeds, view=view)
-        await self.bot.set_cfg(guild.id, f"msg.{cfg_key}", msg.id)
-        return msg
+        async with self.panel_locks.setdefault((guild.id, cfg_key), asyncio.Lock()):
+            marker = f"wb:panel:{guild.id}:{cfg_key}"
+            embeds = [embed.copy() for embed in embeds]
+            if embeds:
+                embeds[-1].set_footer(text=marker)
+            message = None
+            stored = self.bot.cfg(guild.id).get(f"msg.{cfg_key}")
+            if stored and stored.isdigit():
+                try:
+                    message = await channel.fetch_message(int(stored))
+                except discord.NotFound:
+                    pass
+            if message is None:
+                async for candidate in channel.history(limit=None):
+                    if candidate.author.id == self.bot.user.id and any(e.footer.text == marker for e in candidate.embeds):
+                        message = candidate
+                        break
+            if message is None:
+                message = await channel.send(embeds=embeds, view=view, allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await message.edit(embeds=embeds, view=view, allowed_mentions=discord.AllowedMentions.none())
+            await self.bot.set_cfg(guild.id, f"msg.{cfg_key}", message.id)
+            return message
 
     async def remove_panel(self, guild, key, channel):
         """Remove only our recorded panel; never purge other channel messages."""
@@ -308,28 +338,29 @@ class SetupCog(commands.Cog):
         await interaction.response.send_message(t("setup_started", lang), ephemeral=True)
         lines: list[str] = []
         try:
-            roles = await self._ensure_roles(guild, lines)
-            for cat in CATEGORIES:
-                chans = [c for c in cat.channels if c.launch or include_later or self.bot.cfg(guild.id).get(f"ch.{c.key}")]
-                if not chans:
-                    continue
-                category = await self._ensure_category(guild, cat, roles, lines)
-                for ch in chans:
-                    await self._ensure_channel(guild, category, ch, roles, fix_permissions, lines)
-            await self._ensure_automod(guild, lines)
-            if guild_settings:
-                await self._guild_settings(guild, lines)
-            def queue_roles(conn):
-                for member in guild.members:
-                    if member.bot:
+            async with self.guild_locks.setdefault(guild.id, asyncio.Lock()):
+                roles = await self._ensure_roles(guild, lines)
+                for cat in CATEGORIES:
+                    chans = [c for c in cat.channels if c.launch or include_later or self.bot.cfg(guild.id).get(f"ch.{c.key}")]
+                    if not chans:
                         continue
-                    user = repo.user_get(conn, member.id)
-                    target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
-                        'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
-                    repo.role_job_set(conn, guild.id, member.id, target)
-            await self.bot.db.write(queue_roles)
-            notes = await self.post_panels(guild)
-            lines.append("Панели: " + ", ".join(notes))
+                    category = await self._ensure_category(guild, cat, roles, lines)
+                    for ch in chans:
+                        await self._ensure_channel(guild, category, ch, roles, fix_permissions, lines)
+                await self._ensure_automod(guild, lines)
+                if guild_settings:
+                    await self._guild_settings(guild, lines)
+                def queue_roles(conn):
+                    for member in guild.members:
+                        if member.bot:
+                            continue
+                        user = repo.user_get(conn, member.id)
+                        target = (user['rank'] or 'recruit') if user and user['status'] == 'admitted' else (
+                            'rejected' if user and user['status'] in ('rejected', 'banned') else 'unverified')
+                        repo.role_job_set(conn, guild.id, member.id, target)
+                await self.bot.db.write(queue_roles)
+                notes = await self.post_panels(guild)
+                lines.append("Панели: " + ", ".join(notes))
         except discord.Forbidden as exc:
             await interaction.followup.send(f"Forbidden: {exc}. {t('setup_missing_perms', lang, perms='?')}", ephemeral=True)
             return

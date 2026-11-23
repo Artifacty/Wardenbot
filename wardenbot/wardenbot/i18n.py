@@ -139,7 +139,7 @@ _add("tz_set", "Часовой пояс сохранён: {tz}. Время в о
 _add("tz_show", "Ваш часовой пояс: {tz}.", "Your time zone: {tz}.")
 _add("help_text",
      "**Команды**\n`/operation create` создать операцию\n`/timezone set` задать часовой пояс\n`/verify screenshot` отправить скриншот для допуска\n"
-     "`/member vouch` поручиться за игрока (сержант и выше)\n`/priority set` цели в штабе (штаб)\n\nПравила и подсказки: канал «правила».",
+     "`/member vouch` поручиться за игрока (сержант и выше)\n`/priority set` цели в штабе (штаб)\n\nМалую группу создавайте кнопкой в «ищу-группу». Вопрос или жалобу — в «вопросы-и-жалобы». Предложения — в форуме ШТАБА. Правила: входной канал rules.",
      "**Commands**\n`/operation create` create an operation\n`/timezone set` set your time zone\n`/verify screenshot` send your verification screenshot\n"
      "`/member vouch` vouch for a player (sergeants and above)\n`/priority set` HQ objectives (staff)\n\nRules and tips: the rules channel.")
 
@@ -238,3 +238,8 @@ _add("role_missing", "Роль не настроена. Администрато
 async def user_language(interaction) -> str:
     """The current community uses Russian, regardless of legacy language roles."""
     return 'ru'
+
+_add("err_too_many_places", "Всего не больше {detail} мест на операцию: лимит доступа приватных каналов Discord.",
+     "At most {detail} places per operation: Discord private-channel permission limit.")
+_add("op_signup_operation_full", "Достигнут лимит операции: 95 участников для приватных каналов Discord.",
+     "Operation limit reached: 95 participants for private Discord channels.")

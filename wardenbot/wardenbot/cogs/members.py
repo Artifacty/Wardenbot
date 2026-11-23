@@ -43,8 +43,8 @@ class MembersCog(commands.Cog):
             )
             repo.role_job_set(conn, interaction.guild.id, player.id, key)
 
-        await self.bot.db.write(work)
         await interaction.response.defer(ephemeral=True)
+        await self.bot.db.write(work)
         await sync_member_roles(self.bot, interaction.guild, player.id)
         await audit(self.bot, interaction.guild, interaction.user, "Ручной допуск", player.mention, key)  # type: ignore[arg-type]
         await interaction.followup.send(t("mem_admitted", lang, user=player.mention, rank=ROLE_BY_KEY[key].name),
@@ -65,8 +65,8 @@ class MembersCog(commands.Cog):
                 raise OperationError('Сначала допустите игрока через проверку или /member admit.')
             repo.user_update(conn, player.id, now, rank=rank.value)
             repo.role_job_set(conn, interaction.guild.id, player.id, rank.value)
-        await self.bot.db.write(work)
         await interaction.response.defer(ephemeral=True)
+        await self.bot.db.write(work)
         await sync_member_roles(self.bot, interaction.guild, player.id)
         await audit(self.bot, interaction.guild, interaction.user, "Назначение роли", player.mention, rank.value)  # type: ignore[arg-type]
         await interaction.followup.send(t("mem_rank_set", lang, user=player.mention, rank=ROLE_BY_KEY[rank.value].name),
@@ -82,6 +82,7 @@ class MembersCog(commands.Cog):
         def work(conn):
             return repo.user_get(conn, player.id), repo.attended_count(conn, player.id), repo.vouch_valid_count(conn, player.id)
 
+        await interaction.response.defer(ephemeral=True)
         user, ops, vouches = await self.bot.db.read(work)
         if user is None:
             await reply(interaction, t("mem_unknown", lang))
@@ -106,6 +107,7 @@ class MembersCog(commands.Cog):
         if player.bot or not is_admitted(self.bot, player):
             await reply(interaction, t("mem_vouch_not_recruit", lang))
             return
+        await interaction.response.defer(ephemeral=True)
         added = await self.bot.db.write(repo.vouch_add, voucher.id, player.id, True, utcnow())
         if not added:
             await reply(interaction, t("mem_vouch_dup", lang))
@@ -125,12 +127,14 @@ class MembersCog(commands.Cog):
             await reply(interaction, parse_error_text(exc, lang))
             return
         now = utcnow()
+        await interaction.response.defer(ephemeral=True)
         await self.bot.db.write(lambda conn: repo.user_update(conn, interaction.user.id, now, tz=name))
         await reply(interaction, t("tz_set", lang, tz=name))
 
     @timezone.command(name="show", description="Show your time zone · Показать часовой пояс")
     async def tz_show(self, interaction: discord.Interaction) -> None:
         lang = await user_language(interaction)
+        await interaction.response.defer(ephemeral=True)
         user = await self.bot.db.read(repo.user_get, interaction.user.id)
         name = (user["tz"] if user is not None and user["tz"] else None) or self.bot.config.default_tz
         await reply(interaction, t("tz_show", lang, tz=name))

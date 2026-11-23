@@ -16,11 +16,13 @@ def validate(title, body, capacity):
         raise OperationError('Сократите название до 70 символов, описание — до 1000.')
 
 
-def create(conn, guild, owner, kind, title, body, capacity=1, staff=False, request_key=None):
+def create(conn, guild, owner, kind, title, body, capacity=1, staff=False, request_key=None, ticket_type="question"):
     require_access(conn, owner, staff)
     if kind not in ('ticket', 'group'):
         raise OperationError('Неизвестный тип записи.')
     validate(title, body, capacity)
+    if ticket_type not in ('question', 'complaint'):
+        raise OperationError('Выберите вопрос или жалобу.')
     if request_key:
         prior = conn.execute('SELECT id, guild_id, owner_id FROM community_posts WHERE request_key=?', (request_key,)).fetchone()
         if prior:
@@ -30,8 +32,8 @@ def create(conn, guild, owner, kind, title, body, capacity=1, staff=False, reque
     count = conn.execute("SELECT COUNT(*) FROM community_posts WHERE guild_id=? AND owner_id=? AND kind=? AND state='open'", (guild, owner, kind)).fetchone()[0]
     if count >= (1 if kind == 'ticket' else 2):
         raise OperationError('У вас уже есть открытый тикет или две активные группы.')
-    pid = conn.execute('INSERT INTO community_posts(guild_id,owner_id,kind,title,body,capacity,request_key) VALUES (?,?,?,?,?,?,?)',
-                       (guild, owner, kind, title.strip(), body.strip(), capacity, request_key)).lastrowid
+    pid = conn.execute('INSERT INTO community_posts(guild_id,owner_id,kind,title,body,capacity,request_key,ticket_type) VALUES (?,?,?,?,?,?,?,?)',
+                       (guild, owner, kind, title.strip(), body.strip(), capacity, request_key, ticket_type)).lastrowid
     if kind == 'group':
         conn.execute('INSERT INTO group_members VALUES (?,?)', (pid, owner))
     return pid

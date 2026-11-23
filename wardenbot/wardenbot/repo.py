@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterable
 
-from .slots import SlotSpec, SupplySpec
-from .timeutil import from_iso, to_iso
+from .slots import SlotSpec, SupplySpec, MAX_OPERATION_MEMBERS
+from .timeutil import from_iso, to_iso, ParseError
 
 Row = sqlite3.Row
 
@@ -221,6 +221,8 @@ def op_create(
     now: datetime,
     clan_id: int | None = None,
 ) -> int:
+    if sum(slot.capacity for slot in slots) > MAX_OPERATION_MEMBERS:
+        raise ParseError("too_many_places", str(MAX_OPERATION_MEMBERS))
     cur = conn.execute(
         "INSERT INTO operations(guild_id,organizer_id,title,region,type,language,start_at,duration_min,"
         "requirements,briefing_public,briefing_closed,created_at,clan_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -305,6 +307,8 @@ def signup(
     existing = op_signup_of(conn, op_id, user_id)
     if existing is not None and existing["slot_id"] == slot_id:
         return SignupResult("already", slot["name"])
+    if existing is None and conn.execute('SELECT COUNT(*) FROM op_signups WHERE op_id=?', (op_id,)).fetchone()[0] >= MAX_OPERATION_MEMBERS:
+        return SignupResult("operation_full", slot["name"])
     taken = conn.execute("SELECT COUNT(*) FROM op_signups WHERE slot_id=?", (slot_id,)).fetchone()[0]
     if taken >= slot["capacity"]:
         return SignupResult("full", slot["name"])

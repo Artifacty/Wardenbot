@@ -315,7 +315,7 @@ class SlotSelectView(discord.ui.View):
         lang = self.lang
         key = {
             "ok": "op_signup_ok", "moved": "op_signup_moved", "already": "op_signup_already",
-            "full": "op_signup_full", "closed": "op_signup_closed", "no_slot": "err_generic",
+            "full": "op_signup_full", "operation_full": "op_signup_operation_full", "closed": "op_signup_closed", "no_slot": "err_generic",
         }.get(result.status, "err_generic")
         if result.status == "ok":
             op = await self.cog.bot.db.read(repo.op_get, self.op_id)

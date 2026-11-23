@@ -4,6 +4,7 @@ import json
 from . import repo, clans
 from .opsmeta import OP_TYPES
 from .ranks import noshow_block_until
+from .slots import MAX_OPERATION_MEMBERS
 from .timeutil import from_iso, to_iso, resolve_tz
 
 
@@ -69,6 +70,8 @@ def edit(conn, actor, op_id, revision, fields, slots, supply, now):
     if (len({x.name.casefold() for x in slots})!=len(slots) or len({x.name.casefold() for x in supply})!=len(supply)
             or any(not 1<=x.capacity<=200 for x in slots) or any(not 1<=x.needed<=10000000 for x in supply)):
         raise OperationError('Проверьте уникальность названий и количества.')
+    if sum(slot.capacity for slot in slots) > MAX_OPERATION_MEMBERS:
+        raise OperationError(f'Не больше {MAX_OPERATION_MEMBERS} мест на операцию: ограничение приватных каналов Discord.')
     resolve_tz(fields['timezone'])
     moved = fields['start_at'] != op['start_at']
     if moved and (from_iso(fields['start_at']) <= now or op['status'] != 'open'):

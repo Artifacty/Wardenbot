@@ -4,8 +4,6 @@ One bot process per database. A stable footer reconciles a successful Discord se
 whose database receipt was lost. Failures leave the source intact and are retried.
 """
 import asyncio
-import gzip
-import io
 import json
 import discord
 from . import archives, repo
@@ -66,33 +64,17 @@ class OperationArchiver:
                     'slots': [dict(r) for r in await self.bot.db.read(repo.op_slots, op['id'])],
                     'supply': [dict(r) for r in await self.bot.db.read(repo.op_supply, op['id'])],
                     'signups': [dict(row) for row in signups],
-                    'discussion': [],
-                    'attachments_note': 'Вложения обсуждения сохранены ссылками; ссылки Discord могут истечь.',
                 }
-                if thread is not None:
-                    await thread.edit(locked=True, archived=True, reason='Preparing operation archive')
-                    async for msg in thread.history(limit=None, oldest_first=True):
-                        if msg.author.id != self.bot.user.id and not self.bot.intents.message_content:
-                            raise RuntimeError('Enable Message Content Intent to archive discussion; source retained')
-                        payload['discussion'].append({
-                            'id': msg.id, 'author_id': msg.author.id,
-                            'created_at': msg.created_at.isoformat(), 'content': msg.content,
-                            'embeds': [e.to_dict() for e in msg.embeds],
-                            'attachments': [{'filename': a.filename, 'url': a.url} for a in msg.attachments],
-                        })
                 await self.bot.db.write(archives.save, op['id'], channel.id, payload)
                 job = await self.bot.db.read(archives.get, op['id'])
             if message is None:
                 payload = json.loads(job['payload'])
-                data = gzip.compress(job['payload'].encode('utf-8'), mtime=0)
-                if len(data) > guild.filesize_limit:
-                    raise RuntimeError(f"Archive for operation {op['id']} exceeds Discord upload limit; source retained")
                 embed = discord.Embed.from_dict(payload['card'])
                 embed.set_footer(text=marker)
                 message = await channel.send(
-                    content=f"Архив операции #{op['id']}. Состав и обсуждение — в файле JSON.gz." +
+                    content=f"Итоги операции #{op['id']}." +
                             ('\nПричина отмены: '+payload['cancel_reason'] if payload.get('cancel_reason') else ''),
-                    embed=embed, file=discord.File(io.BytesIO(data), filename=f"operation-{op['id']}.json.gz"),
+                    embed=embed,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             await self.bot.db.write(archives.receipt, op['id'], message.id)

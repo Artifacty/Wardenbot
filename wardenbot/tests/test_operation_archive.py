@@ -56,7 +56,9 @@ def test_archive_precedes_delete_and_survives_restart(tmp_path):
         job = await bot.db.read(archives.get,op['id'])
         assert 'PRIVATE SECRET' not in job['payload']
         payload = json.loads(job['payload'])
-        assert payload['discussion'][0]['content'] == 'Public discussion'
+        assert 'discussion' not in payload
+        assert 'file' not in channel.send.call_args.kwargs
+        assert 'files' not in channel.send.call_args.kwargs
         assert payload['operation']['briefing_public'] == 'Public plan'
         assert job['source_deleted']
         bot.db.close()
@@ -131,15 +133,17 @@ def test_missing_archive_leaves_board_intact(tmp_path):
     asyncio.run(go())
 
 
-def test_unreadable_discussion_is_never_deleted(tmp_path):
+def test_archive_ignores_discussion_and_needs_no_message_content_intent(tmp_path):
     async def go():
         bot,op,channel,thread,_ = await fixture(tmp_path/'db')
         bot.intents.message_content = False
-        with pytest.raises(RuntimeError, match='Message Content Intent'):
-            await OperationArchiver(bot).run(op,thread)
-        channel.send.assert_not_awaited()
-        thread.delete.assert_not_awaited()
-        assert await bot.db.read(archives.get,op['id']) is None
+        thread.history = MagicMock(side_effect=AssertionError('Discussion must not be read'))
+        await OperationArchiver(bot).run(op,thread)
+        channel.send.assert_awaited_once()
+        assert 'file' not in channel.send.call_args.kwargs
+        thread.history.assert_not_called()
+        thread.delete.assert_awaited_once()
+        assert (await bot.db.read(archives.get,op['id']))['source_deleted']
         bot.db.close()
     asyncio.run(go())
 
@@ -152,6 +156,22 @@ def test_bot_only_post_archives_without_message_content_intent(tmp_path):
             created_at=NOW,content='Объявление бота',embeds=[],attachments=[])])
         await OperationArchiver(bot).run(op,thread)
         channel.send.assert_awaited_once()
+        thread.delete.assert_awaited_once()
+        bot.db.close()
+    asyncio.run(go())
+
+
+def test_old_pending_snapshot_sends_card_without_legacy_discussion_file(tmp_path):
+    async def go():
+        bot, op, channel, thread, _ = await fixture(tmp_path / 'old_archive.db')
+        payload = {'card': discord.Embed(title='Итоги').to_dict(),
+                   'discussion': [{'content': 'Не публиковать текст переписки'}]}
+        await bot.db.write(archives.save, op['id'], channel.id, payload)
+        bot.intents.message_content = False
+        await OperationArchiver(bot).run(op, thread)
+        sent = channel.send.call_args.kwargs
+        assert 'file' not in sent and 'files' not in sent
+        assert 'Не публиковать' not in str(sent)
         thread.delete.assert_awaited_once()
         bot.db.close()
     asyncio.run(go())

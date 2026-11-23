@@ -32,6 +32,7 @@ class ClansCog(commands.Cog):
         if not isinstance(interaction.user,discord.Member) or not can_staff(self.bot,interaction.user):
             await self.error(interaction,clans.ClanError('permission'))
             return
+        await interaction.response.defer(ephemeral=True)
         try:
             cid=await self.bot.db.write(clans.register,interaction.guild.id,name)
         except clans.ClanError as exc:

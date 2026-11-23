@@ -245,6 +245,9 @@ MIGRATIONS: list[str] = [
         role TEXT NOT NULL, channel_id INTEGER NOT NULL, PRIMARY KEY(guild_id,source,source_id,role)
     );
     """,
+    """
+    ALTER TABLE community_posts ADD COLUMN ticket_type TEXT NOT NULL DEFAULT 'question';
+    """,
 
 ]
 

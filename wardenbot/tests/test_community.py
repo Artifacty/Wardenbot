@@ -151,6 +151,11 @@ async def discord_fixture(path=':memory:'):
     guild.get_role.side_effect = lambda rid: staff if rid == 77 else None
     channels, next_id = {}, 100
     guild.get_channel.side_effect = channels.get
+    async def fetch_channel(cid):
+        if cid not in channels:
+            raise discord.NotFound(SimpleNamespace(status=404, reason='Not Found'), 'Unknown Channel')
+        return channels[cid]
+    guild.fetch_channel = AsyncMock(side_effect=fetch_channel)
     cfg = {'role.staff': '77'}
     bot = SimpleNamespace(db=db, user=players[999], cfg=lambda gid: cfg, get_guild=lambda gid: guild if gid == 1 else None)
     async def set_cfg(gid, key, value):
@@ -171,6 +176,12 @@ async def discord_fixture(path=':memory:'):
                 setattr(ch, key, value)
             return ch
         ch.edit = AsyncMock(side_effect=edit)
+        async def delete(**kwargs):
+            channels.pop(ch.id, None)
+            for category in guild.categories:
+                category.channels[:] = [item for item in category.channels if item.id != ch.id]
+            guild.text_channels[:] = [item for item in guild.text_channels if item.id != ch.id]
+        ch.delete = AsyncMock(side_effect=delete)
         channels[ch.id] = ch
         if is_category:
             guild.categories.append(ch)
@@ -244,7 +255,8 @@ def test_group_voice_permissions_join_leave_close_and_restart(tmp_path):
         await bot.db.write(service.act, pid, 1, 10, False, 'close')
         await cog.post(pid)
         assert msg.controls is None
-        assert voice.overwrites[players[10]].connect is False
+        assert voice.id not in channels
+        voice.delete.assert_awaited_once()
         bot.db.close()
     asyncio.run(go())
 
@@ -278,7 +290,14 @@ def test_operation_creates_three_private_rooms_and_recovers_partial_failure():
             slots=[SlotSpec('Пехота', 5)], supply=[], now=NOW))
         await bot.db.write(repo.op_update, oid, thread_id=42)
         original = guild.create_voice_channel.side_effect
-        guild.create_voice_channel.side_effect = RuntimeError('Network failure')
+        attempts = 0
+        async def partial_failure(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                raise RuntimeError('Network failure')
+            return await original(*args, **kwargs)
+        guild.create_voice_channel.side_effect = partial_failure
         with pytest.raises(RuntimeError):
             await cog.sync_operation(oid)
         assert len(await bot.db.read(lambda conn: conn.execute('SELECT * FROM activity_rooms').fetchall())) == 1
@@ -287,7 +306,7 @@ def test_operation_creates_three_private_rooms_and_recovers_partial_failure():
         rooms = await bot.db.read(lambda conn: conn.execute('SELECT * FROM activity_rooms').fetchall())
         assert {r['role'] for r in rooms} == {'подготовка', 'Войс 1', 'Войс 2'}
         await cog.sync_operation(oid)
-        assert len([ch for ch in channels.values() if isinstance(ch, discord.VoiceChannel)]) == 2
+        assert len([ch for ch in channels.values() if isinstance(ch, discord.VoiceChannel)]) == 3
         for room in rooms:
             ch = channels[room['channel_id']]
             assert players[10] in ch.overwrites and players[20] not in ch.overwrites
@@ -297,7 +316,8 @@ def test_operation_creates_three_private_rooms_and_recovers_partial_failure():
         assert all(players[10] not in channels[r['channel_id']].overwrites for r in rooms)
         await bot.db.write(repo.op_update, oid, status='done')
         await cog.sync_operation(oid)
-        assert len(await bot.db.read(lambda conn: conn.execute('SELECT * FROM activity_rooms').fetchall())) == 3
+        assert not await bot.db.read(lambda conn: conn.execute('SELECT * FROM activity_rooms').fetchall())
+        assert all(room['channel_id'] not in channels for room in rooms)
         bot.db.close()
     asyncio.run(go())
 
@@ -317,7 +337,7 @@ def test_upgrade_v7_preserves_users_and_operations(tmp_path, monkeypatch):
         old.close()
         monkeypatch.setattr(storage, 'MIGRATIONS', migrations)
         updated = Database(str(path))
-        assert updated.conn.execute('PRAGMA user_version').fetchone()[0] == 8
+        assert updated.conn.execute('PRAGMA user_version').fetchone()[0] == 9
         assert (await updated.read(repo.op_get, oid))['briefing_closed'] == 'План'
         assert (await updated.read(repo.user_get, 10))['status'] == 'admitted'
         pid = await updated.write(service.create, 1, 10, 'ticket', 'Вопрос', 'Работает после миграции')

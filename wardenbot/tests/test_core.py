@@ -186,7 +186,7 @@ def test_migration_is_idempotent(tmp_path):
     path = str(tmp_path / "x.db")
     connect(path).close()
     c = connect(path)
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert c.execute("PRAGMA user_version").fetchone()[0] == 9
     c.close()
 
 
@@ -290,7 +290,6 @@ def test_backup_tool_makes_a_readable_copy_and_prunes(tmp_path):
     db.conn.execute("INSERT INTO guild_config(guild_id,key,value) VALUES (1,'k','v')")
     for i in range(3):
         copy = backup_tool.backup(db_file, tmp_path / "b", keep=2)
-        import time; time.sleep(1.1)
     import sqlite3
     row = sqlite3.connect(copy).execute("SELECT value FROM guild_config").fetchone()
     assert row == ("v",)

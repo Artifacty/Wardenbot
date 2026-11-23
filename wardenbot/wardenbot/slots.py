@@ -9,6 +9,8 @@ from .timeutil import ParseError
 
 MAX_SLOTS = 12
 MAX_CAPACITY = 200
+# 100 Discord overwrites minus everyone, bot, two staff roles and the organizer.
+MAX_OPERATION_MEMBERS = 95
 MAX_NAME = 40
 MAX_SUPPLY_ITEMS = 12
 MAX_SUPPLY_AMOUNT = 10_000_000
@@ -56,6 +58,8 @@ def parse_slots(text: str) -> list[SlotSpec]:
         raise ParseError("no_slots")
     if len(result) > MAX_SLOTS:
         raise ParseError("too_many_slots", str(MAX_SLOTS))
+    if sum(slot.capacity for slot in result) > MAX_OPERATION_MEMBERS:
+        raise ParseError("too_many_places", str(MAX_OPERATION_MEMBERS))
     return result
 
 

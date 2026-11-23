@@ -37,7 +37,7 @@ class Config:
     dev_guild_id: int | None = None
     channel_name_style: str = "full"  # full | ru | en
     log_level: str = "INFO"
-    message_content_intent: bool = False  # required only to archive participant discussion
+    message_content_intent: bool = False  # optional; archive cards do not require message contents
     # Rank rules (starting values from the project plan).
     private_after_days: int = 7
     sergeant_after_ops: int = 10

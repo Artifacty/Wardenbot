@@ -160,6 +160,9 @@ CATEGORIES: tuple[CategoryDef, ...] = (
             "Новости сервера и бота.", "Server and bot news.", "recruit", "ro"),
     )),
     CategoryDef("hq", "01", "ШТАБ", "HQ", "🏛️", "private", (
+        _ch("feedback", "forum", "▤", "предложения", "feedback", "💡",
+            "Предложения по серверу и боту.", "Suggestions for the server and the bot.", "recruit", "forum_open",
+            guidelines="Одна идея — один пост. Опишите предложение и чем оно поможет сообществу. Вопросы и жалобы отправляйте через тикеты."),
         _ch("objectives", "text", "⬢", "цели", "objectives", "🎯",
             "Текущие направления и цели. Один пост на фронт; бот редактирует их.",
             "Current fronts and goals. One post per front; the bot edits them.", "private", "ro"),
@@ -212,8 +215,6 @@ CATEGORIES: tuple[CategoryDef, ...] = (
             "Вопросы новичков и ответы наставников.", "Newcomer questions and mentor answers.", "recruit", "forum_open", launch=False),
         _ch("guides", "forum", "▤", "гайды", "guides", "📚",
             "Гайды по игре и по серверу.", "Game and server guides.", "recruit", "forum_open", launch=False),
-        _ch("feedback", "forum", "▤", "предложения", "feedback", "💡",
-            "Предложения по серверу и боту.", "Suggestions for the server and the bot.", "recruit", "forum_open", launch=False),
     )),
     CategoryDef("voice", "06", "ГОЛОС", "VOICE", "🎙️", "recruit", (
         _ch("muster_ru", "voice", "◉", "сбор-ru", "muster-ru", "📢",
