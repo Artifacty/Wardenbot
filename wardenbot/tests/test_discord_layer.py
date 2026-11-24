@@ -132,13 +132,17 @@ def test_modals_respect_discord_limits(lang):
         assert len(modal.title) <= 45, modal.title
         assert 1 <= len(modal.children) <= 5
         for field in modal.children:
+            wrapped = isinstance(field, discord.ui.Label)
             if isinstance(field, discord.ui.Label):
                 assert len(field.text) <= 45
                 field = field.component
                 if isinstance(field, discord.ui.Select):
                     assert len(field.options) <= 25
                     continue
-            assert len(field.label) <= 45, field.label
+            if wrapped:
+                assert field.to_component_dict().get('label') is None
+            else:
+                assert len(field.label) <= 45, field.label
             if field.default:
                 assert len(field.default) <= field.max_length, field.label
             if field.placeholder:

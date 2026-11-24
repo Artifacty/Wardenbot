@@ -79,9 +79,10 @@ class VerifyModal(discord.ui.Modal):
         lang = "ru"
         super().__init__(title=t("ver_modal_title", lang), timeout=900)
         self.lang = lang
-        self.steam = discord.ui.TextInput(label=t("ver_f_steam", lang), placeholder="https://steamcommunity.com/profiles/7656…", required=False, max_length=200)
-        self.name = discord.ui.TextInput(label=t("ver_f_name", lang), max_length=40)
-        self.regiment = discord.ui.TextInput(label=t("ver_f_regiment", lang), required=False, max_length=40)
+        # Label owns the caption; Discord rejects a nested TextInput with its own label.
+        self.steam = discord.ui.TextInput(placeholder="https://steamcommunity.com/profiles/7656…", required=False, max_length=200)
+        self.name = discord.ui.TextInput(max_length=40)
+        self.regiment = discord.ui.TextInput(required=False, max_length=40)
         for label, item in (("Имя в игре", self.name), ("Клан (необязательно)", self.regiment),
                             ("Steam (необязательно)", self.steam)):
             self.add_item(discord.ui.Label(text=label, component=item))
