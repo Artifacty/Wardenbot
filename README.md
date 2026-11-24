@@ -2,7 +2,7 @@
 
 Discord-бот для русскоязычного сообщества Варденов в Foxhole: проверка игроков,
 клановые операции, быстрые группы, временные голосовые комнаты и приватные обращения модерации.
-Стек: Python 3.14, discord.py, SQLite.
+Стек: Python 3.13, discord.py, SQLite.
 
 - [Запуск на Windows и Ubuntu](wardenbot/README.md)
 - [Обновление до 1.0 и проверка перед открытием](wardenbot/docs/RELEASE_1_0.md)

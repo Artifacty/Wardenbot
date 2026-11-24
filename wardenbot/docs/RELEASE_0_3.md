@@ -5,7 +5,7 @@
 ## Обновление
 
 1. Остановить единственный процесс бота, сохранить копию SQLite и обновить исходники.
-2. Из каталога `wardenbot` обновить зависимости и запустить на Python 3.14:
+2. Из каталога `wardenbot` обновить зависимости и запустить на Python 3.13:
    `python -m pip install -r requirements.txt`, затем `python -m wardenbot`.
    Схема v7→v8 применяется автоматически; данные старых функций сохраняются.
 3. Проверить право бота **Move Members** (добавлено к прежним правам управления каналами).
@@ -103,7 +103,7 @@ ID комнат, сообщений и отправленной формы хр�
 После остановки текущего процесса и обновления исходников запустите из каталога приложения:
 
 ```powershell
-.\.venv314\Scripts\python.exe -m wardenbot --sync-commands
+.\.venv313\Scripts\python.exe -m wardenbot --sync-commands
 ```
 
 На Ubuntu соответствующая команда: `.venv/bin/python -m wardenbot --sync-commands`.

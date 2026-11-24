@@ -1,15 +1,15 @@
 > **Релиз 1.0:** [обновление, изменения и проверка перед открытием](docs/RELEASE_1_0.md).
 > Один рабочий Discord-сервер на отдельный экземпляр, токен и БД. Тестовый сервер используйте с отдельной установкой: профили допуска между серверами одной БД не изолированы.
 
-# Warden Bot · v1.0.3
+# Warden Bot · v1.0.4
 
 Дискорд-бот для русскоязычного сервера Варденов в Foxhole. Он строит сервер по плану (роли, каналы, права), проводит допуск, ведёт доску операций с записью по слотам, пишет напоминания, публикует цели штаба и повышает игроков по правилам.
 
-**Статус:** версия для предстартовой проверки закрытого сообщества на одном Discord-сервере. Проверены миграции SQLite, права, конкурентные действия и восстановление после перезапуска на Python 3.14. Ответы Discord в автотестах моделируются; перед открытием выполните [проверку на сервере](docs/RELEASE_1_0.md).
+**Статус:** версия для предстартовой проверки закрытого сообщества на одном Discord-сервере. Проверены миграции SQLite, права, конкурентные действия и восстановление после перезапуска на Python 3.13. Ответы Discord в автотестах моделируются; перед открытием выполните [проверку на сервере](docs/RELEASE_1_0.md).
 
 Текущий этап и оставшиеся ограничения: [план разработки](docs/DEVELOPMENT.md).
 
-## Что умеет v1.0.3
+## Что умеет v1.0.4
 
 | Модуль | Что делает |
 |---|---|
@@ -33,7 +33,7 @@
 
 ## Что понадобится
 
-* Python 3.14 (или Docker).
+* Python 3.13 (проверка совместимости включает 3.13.3) или Docker.
 * Аккаунт Discord, свой тестовый сервер и позже боевой.
 * Любой компьютер для проверки, затем сервер, где бот будет работать круглосуточно (см. `docs/HOSTING.md`).
 
@@ -61,27 +61,34 @@
 
 ## Шаг 3. Запустить бота у себя
 
+При переходе с Python 3.14 остановите бота и создайте **новое** виртуальное окружение
+на Python 3.13, например `.venv313`. Установите в него `requirements.txt` и используйте
+новый путь Python в команде запуска или systemd. Существующие `.env` и `data/` сохраните;
+повторно копировать `.env.example` поверх настроенного `.env` не нужно.
+В панели хостинга выберите Python 3.13, переустановите зависимости и запускайте
+`python -m wardenbot` из папки с `requirements.txt`. Базе SQLite нужен постоянный диск.
+
 Windows (обычная командная строка `cmd`, активировать окружение не нужно):
 
-1. Проверьте, есть ли Python: `py --list`. Нужна версия 3.14. Если пишет «No suitable Python runtime found» или список пуст, установите Python с <https://www.python.org/downloads/windows/> и **поставьте галочку «Add python.exe to PATH»**. Либо: `winget install Python.Python.3.14`. После установки откройте командную строку заново.
+1. Проверьте, есть ли Python: `py --list`. Нужна версия 3.13. Если пишет «No suitable Python runtime found» или список пуст, установите Python с <https://www.python.org/downloads/windows/> и **поставьте галочку «Add python.exe to PATH»**. Либо: `winget install Python.Python.3.13`. После установки откройте командную строку заново.
 2. Дальше по порядку:
 
 ```bat
 cd /d E:\wardenbot
-py -3.14 -m venv .venv
+py -3.13 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 copy .env.example .env
 notepad .env
 .venv\Scripts\python.exe -m wardenbot
 ```
 
-`py -3.14 -m venv` явно выбирает Python 3.14. Команды `Activate.ps1` и `activate` не нужны: мы вызываем `python.exe` из `.venv` напрямую. (`Activate.ps1` работает только в PowerShell и при разрешённых скриптах, а в `cmd` он не запускается вовсе.)
+`py -3.13 -m venv` явно выбирает Python 3.13. Команды `Activate.ps1` и `activate` не нужны: мы вызываем `python.exe` из `.venv` напрямую. (`Activate.ps1` работает только в PowerShell и при разрешённых скриптах, а в `cmd` он не запускается вовсе.)
 
 Linux / macOS:
 
 ```bash
 cd wardenbot
-python3.14 -m venv .venv && source .venv/bin/activate
+python3.13 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env && nano .env
 python -m wardenbot
@@ -138,13 +145,13 @@ docker compose logs -f
 
 ### Вариант Б: systemd (Linux без Docker)
 
-Требуется отдельно установленный Python 3.14: штатный Python Ubuntu 24.04 — 3.12.
+Требуется отдельно установленный Python 3.13: штатный Python Ubuntu 24.04 — 3.12.
 Не заменяйте системный Python; для простого запуска используйте Docker выше.
 
 ```bash
 sudo useradd --system --create-home --home-dir /opt/wardenbot wardenbot
 sudo cp -r wardenbot tools requirements.txt .env.example /opt/wardenbot/ && cd /opt/wardenbot
-sudo -u wardenbot python3.14 -m venv .venv
+sudo -u wardenbot python3.13 -m venv .venv
 sudo -u wardenbot .venv/bin/pip install -r requirements.txt
 sudo -u wardenbot cp .env.example .env && sudo -u wardenbot nano .env && sudo chmod 600 .env
 sudo -u wardenbot mkdir -p data backups

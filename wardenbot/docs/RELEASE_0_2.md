@@ -9,8 +9,8 @@
    ~~~powershell
    git pull
    cd wardenbot
-   ..\.venv314\Scripts\python.exe -m pip install -r requirements-dev.txt
-   ..\.venv314\Scripts\python.exe -m pytest -q
+   ..\.venv313\Scripts\python.exe -m pip install -r requirements-dev.txt
+   ..\.venv313\Scripts\python.exe -m pytest -q
    ~~~
 
 3. В существующем .env проверьте DB_PATH: это должна быть прежняя БД.
@@ -21,11 +21,11 @@
 5. Из той же папки запустите:
 
    ~~~powershell
-   ..\.venv314\Scripts\python.exe -m wardenbot
+   ..\.venv313\Scripts\python.exe -m wardenbot
    ~~~
 
    Миграция до схемы 7 автоматическая. Уже отправленные напоминания сохраняются.
-   На Ubuntu обновите зависимости Python 3.14 venv и перезапустите systemd по HOSTING.md.
+   На Ubuntu обновите зависимости Python 3.13 venv и перезапустите systemd по HOSTING.md.
 6. В Discord выполните /setup run, /setup status, /menu.
    При устаревших командах — /setup sync. Для одного сервера удобно оставить DEV_GUILD_ID
    равным ID этого сервера: команды регистрируются сразу в нём.

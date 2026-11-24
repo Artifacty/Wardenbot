@@ -1,3 +1,3 @@
 """Warden community bot for Foxhole Discord servers."""
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
