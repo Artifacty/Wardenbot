@@ -106,3 +106,8 @@ def reconcile_access(conn, pid, staff_ids):
                 conn.execute("UPDATE community_posts SET state='closed' WHERE id=?", (pid,))
             else:
                 conn.execute('DELETE FROM group_members WHERE post_id=? AND user_id=?', (pid, uid))
+
+
+def message_deleted(conn, pid):
+    """Acknowledge deletion only after Discord confirms it, including a 404 response."""
+    conn.execute("UPDATE community_posts SET message_deleted=1 WHERE id=? AND kind='group' AND state='closed'", (pid,))

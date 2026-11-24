@@ -288,6 +288,49 @@ class CommunityCog(commands.Cog):
         if failures:
             raise failures[0]
 
+    async def delete_group_message(self, guild, row):
+        if row['message_deleted']:
+            return
+        channel = None
+        if row['channel_id']:
+            channel = guild.get_channel(row['channel_id'])
+            if channel is None:
+                try:
+                    channel = await guild.fetch_channel(row['channel_id'])
+                except discord.NotFound:
+                    await self.bot.db.write(data.message_deleted, row['id'])
+                    return
+        else:
+            channel = get_text_channel(self.bot, guild, 'lfg')
+        if channel is None:
+            raise OperationError('Не найден канал объявления группы. Восстановите настройку через /setup run.')
+        marker = f"wb:community:{row['id']}"
+        def matches(message):
+            return message.author.id == self.bot.user.id and any(embed.footer.text == marker for embed in message.embeds)
+        messages = []
+        if row['message_id']:
+            try:
+                message = await channel.fetch_message(row['message_id'])
+            except discord.NotFound:
+                pass
+            else:
+                if not matches(message):
+                    raise OperationError('Сохранённое сообщение не является объявлением этой группы; удаление остановлено.')
+                messages.append(message)
+        else:
+            # A send may have reached Discord without its message ID reaching SQLite.
+            key = row['request_key']
+            after = discord.Object(id=int(key)) if key and key.isdigit() else None
+            async for message in channel.history(limit=None, after=after):
+                if matches(message):
+                    messages.append(message)
+        for message in messages:
+            try:
+                await message.delete()
+            except discord.NotFound:
+                pass
+        await self.bot.db.write(data.message_deleted, row['id'])
+
     async def panels(self, guild):
         async with self.lock:
             support = get_text_channel(self.bot, guild, 'support')
@@ -327,6 +370,19 @@ class CommunityCog(commands.Cog):
         await self.bot.db.write(data.reconcile_access, pid, staff_ids)
         row = await self.bot.db.read(data.get, pid)
         closed = row['state'] != 'open'
+        if closed and row['kind'] == 'group':
+            failures = []
+            # A failure deleting voice must not leave a finished group's advert on the board.
+            for cleanup in (lambda: self.delete_group_message(guild, row),
+                            lambda: self.delete_rooms(guild, 'group', pid)):
+                try:
+                    await cleanup()
+                except Exception as error:
+                    failures.append(error)
+            self.synced.pop(pid, None)
+            if failures:
+                raise failures[0]
+            return
         users = [row['owner_id']] if row['kind'] == 'ticket' else await self.bot.db.read(data.members, pid)
         if row['kind'] == 'ticket':
             category = await self.category(guild, 'tickets', 'Обращения к модерации')
@@ -337,19 +393,15 @@ class CommunityCog(commands.Cog):
             topic = 'Жалоба' if row['ticket_type'] == 'complaint' else 'Вопрос'
             description = f"**{topic}**\n{row['body']}\nАвтор: <@{row['owner_id']}>"
         else:
-            voice = None
-            if closed:
-                await self.delete_rooms(guild, 'group', pid)
-            else:
-                category = await self.category(guild, 'small_groups', 'Небольшие группы')
-                allowed = await self.admitted_users(guild, users)
-                voice = await self.room(guild, 'group', pid, 'Сбор', row['title'], allowed, category)
+            category = await self.category(guild, 'small_groups', 'Небольшие группы')
+            allowed = await self.admitted_users(guild, users)
+            voice = await self.room(guild, 'group', pid, 'Сбор', row['title'], allowed, category)
             channel = get_text_channel(self.bot, guild, 'lfg')
             if not channel:
                 raise OperationError('Не найден канал поиска группы. Администратору нужно выполнить /setup run.')
-            if not voice and not closed:
+            if not voice:
                 return
-            voice_text = voice.mention if voice else 'удалён — группа завершена'
+            voice_text = voice.mention
             description = (f"{row['body']}\nВойс: {voice_text}\nАвтор: <@{row['owner_id']}>\n"
                            f"Участники {len(users)}/{row['capacity']}: " + ' '.join(f'<@{uid}>' for uid in users))
         title = ('Закрыто · ' if closed else 'Идёт сейчас · ' if row['kind'] == 'group' else '') + row['title']

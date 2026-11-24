@@ -248,6 +248,9 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE community_posts ADD COLUMN ticket_type TEXT NOT NULL DEFAULT 'question';
     """,
+    """
+    ALTER TABLE community_posts ADD COLUMN message_deleted INTEGER NOT NULL DEFAULT 0;
+    """,
 
 ]
 

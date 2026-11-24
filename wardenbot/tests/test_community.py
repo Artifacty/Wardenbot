@@ -195,9 +195,14 @@ async def discord_fixture(path=':memory:'):
             async def edit_message(**changes):
                 msg.embeds, msg.controls = [changes['embed']], changes['view']
             msg.edit = AsyncMock(side_effect=edit_message)
+            async def delete_message():
+                messages.pop(msg.id, None)
+            msg.delete = AsyncMock(side_effect=delete_message)
             messages[msg.id] = msg
             return msg
         async def fetch(mid):
+            if mid not in messages:
+                raise discord.NotFound(SimpleNamespace(status=404, reason='Not Found'), 'Unknown Message')
             return messages[mid]
         async def history(limit=None, after=None):
             for message in reversed(list(messages.values())):
@@ -254,7 +259,8 @@ def test_group_voice_permissions_join_leave_close_and_restart(tmp_path):
         assert (await bot.db.read(service.get, pid))['message_id'] == msg.id
         await bot.db.write(service.act, pid, 1, 10, False, 'close')
         await cog.post(pid)
-        assert msg.controls is None
+        assert not lfg.messages
+        msg.delete.assert_awaited_once()
         assert voice.id not in channels
         voice.delete.assert_awaited_once()
         bot.db.close()
@@ -337,7 +343,7 @@ def test_upgrade_v7_preserves_users_and_operations(tmp_path, monkeypatch):
         old.close()
         monkeypatch.setattr(storage, 'MIGRATIONS', migrations)
         updated = Database(str(path))
-        assert updated.conn.execute('PRAGMA user_version').fetchone()[0] == 9
+        assert updated.conn.execute('PRAGMA user_version').fetchone()[0] == 10
         assert (await updated.read(repo.op_get, oid))['briefing_closed'] == 'План'
         assert (await updated.read(repo.user_get, 10))['status'] == 'admitted'
         pid = await updated.write(service.create, 1, 10, 'ticket', 'Вопрос', 'Работает после миграции')

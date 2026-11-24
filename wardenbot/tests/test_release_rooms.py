@@ -150,7 +150,7 @@ def test_closed_operation_removes_unrecorded_room_but_preserves_other_ids():
     asyncio.run(go())
 
 
-def test_group_close_recovers_after_delete_failure_and_removes_voice_link(tmp_path):
+def test_group_close_removes_post_even_when_voice_deletion_needs_retry(tmp_path):
     async def go():
         path = tmp_path / 'group.db'
         bot, guild, _, channels, lfg = await discord_fixture(path)
@@ -172,8 +172,8 @@ def test_group_close_recovers_after_delete_failure_and_removes_voice_link(tmp_pa
         await cog.post(pid)
         assert voice.id not in channels
         assert guild.create_voice_channel.await_count == 1
-        msg = next(iter(lfg.messages.values()))
-        assert voice.mention not in msg.embeds[0].description and msg.controls is None
+        assert not lfg.messages
+        assert (await bot.db.read(data.get, pid))['message_deleted'] == 1
         bot.db.close()
     asyncio.run(go())
 
