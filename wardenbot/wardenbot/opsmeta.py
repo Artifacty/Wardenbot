@@ -40,6 +40,7 @@ STATUS_TAG = {
     CANCELLED: "⊘ Отменена / Cancel",
 }
 URGENT_TAG = "▲ Срочно / Urgent"
+CLOSED_SIGNUP_TAG = "○ Закрыто / Close"
 
 OP_TYPES: dict[str, Label] = {
     "offense": Label("Наступление", "Offensive"),
@@ -67,6 +68,7 @@ LANG_TAG = {"ru": "RU", "en": "EN", "both": "RU+EN"}
 
 ALL_FORUM_TAGS: list[str] = [
     *STATUS_TAG.values(),
+    CLOSED_SIGNUP_TAG,
     URGENT_TAG,
     *TYPE_TAG.values(),
     *LANG_TAG.values(),

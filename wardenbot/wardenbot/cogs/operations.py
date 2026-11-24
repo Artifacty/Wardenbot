@@ -21,7 +21,7 @@ from ..bot import WardenBot
 from ..i18n import user_language, parse_error_text, t
 from ..opsmeta import (
     DEFAULT_SLOTS, DEFAULT_SUPPLY, DONE, LANG_TAG, LANGS, OP_TYPES, OPEN, RUNNING,
-    STATUS_TAG, TYPE_TAG, URGENT_TAG,
+    STATUS_TAG, TYPE_TAG, URGENT_TAG, CLOSED_SIGNUP_TAG,
 )
 from ..opsplan import Action, OpTimes, plan_actions
 from ..perms import member_role_keys, can_staff, is_admitted
@@ -65,6 +65,12 @@ def load_view(conn, op_id: int) -> OpView | None:
 
 def wanted_tag_names(op: OpView) -> list[str]:
     names = [STATUS_TAG[op.status]]
+    if op.status in (OPEN, RUNNING):
+        recruiting = STATUS_TAG[OPEN] if op.signup_open else CLOSED_SIGNUP_TAG
+        if op.status == OPEN:
+            names = [recruiting]
+        else:
+            names.append(recruiting)
     if op.urgent and op.status in (OPEN, RUNNING):
         names.append(URGENT_TAG)
     names.append(TYPE_TAG[op.type])
@@ -504,10 +510,15 @@ class OperationsCog(commands.Cog):
         self.bot = bot
         self.archiver = OperationArchiver(bot)
         self.operation_locks = {}
+        self.forum_tag_locks = {}
         self.drafts: dict[int, Draft] = {}
         self._pending: dict[int, asyncio.Task] = {}
 
     async def cog_load(self) -> None:
+        # Repair already-acknowledged cards whose old tag ignored closed recruitment.
+        await self.bot.db.write(lambda conn: conn.execute(
+            "UPDATE operations SET card_revision=card_revision+1 "
+            "WHERE status IN ('open','running') AND signup_open=0"))
         self.bot.add_dynamic_items(OpButton)
         self.tick.start()
         self.archive_tick.start()
@@ -557,6 +568,22 @@ class OperationsCog(commands.Cog):
         async with self.op_lock(op_id):
             await self._refresh_card(op_id)
 
+    async def forum_tags(self, forum, view):
+        names = wanted_tag_names(view)
+        by_name = {tag.name: tag for tag in forum.available_tags}
+        if CLOSED_SIGNUP_TAG in names and CLOSED_SIGNUP_TAG not in by_name:
+            # Fetch under a per-forum lock: concurrent cards and a delayed gateway
+            # update must not create duplicate tags or overwrite newer forum tags.
+            async with self.forum_tag_locks.setdefault(forum.id, asyncio.Lock()):
+                current = await forum.guild.fetch_channel(forum.id)
+                by_name = {tag.name: tag for tag in current.available_tags}
+                if CLOSED_SIGNUP_TAG not in by_name:
+                    if len(current.available_tags) >= 20:
+                        raise ops.OperationError('На доске операций заняты все 20 тегов. Освободите место для тега закрытого набора.')
+                    by_name[CLOSED_SIGNUP_TAG] = await current.create_tag(
+                        name=CLOSED_SIGNUP_TAG, reason='Отображение закрытого набора операции')
+        return [by_name[name] for name in names if name in by_name]
+
     async def sync_rooms(self, op_id):
         community = self.bot.get_cog("CommunityCog")
         if community is not None:
@@ -583,8 +610,7 @@ class OperationsCog(commands.Cog):
                 await thread.edit(name=new_title)
             forum = thread.parent
             if isinstance(forum, discord.ForumChannel):
-                by_name = {tag.name: tag for tag in forum.available_tags}
-                tags = [by_name[n] for n in wanted_tag_names(view) if n in by_name]
+                tags = await self.forum_tags(forum, view)
                 if {x.id for x in tags} != {x.id for x in thread.applied_tags}:
                     await thread.edit(applied_tags=tags)
             await self.bot.db.write(repo.card_ack,op_id,op["card_revision"])
