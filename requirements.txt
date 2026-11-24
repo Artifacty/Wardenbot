@@ -1,1 +1,2 @@
--r wardenbot/requirements.txt
+discord.py>=2.7.1,<2.8
+tzdata
