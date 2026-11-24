@@ -251,7 +251,8 @@ def test_group_voice_permissions_join_leave_close_and_restart(tmp_path):
         await cog.post(pid)
         assert guild.create_voice_channel.await_count == 1
         assert len(lfg.messages) == 1
-        # Lost Discord acknowledgement: recover both identities without creating duplicate rooms or posts.
+        # A lost creation receipt leaves the staging name until its ID is persisted.
+        voice.name = f'Строим оборону Сбор · {pid}'
         await bot.db.write(lambda conn: conn.execute('DELETE FROM activity_rooms'))
         await bot.db.write(lambda conn: conn.execute('UPDATE community_posts SET message_id=NULL'))
         await CommunityCog(bot).post(pid)

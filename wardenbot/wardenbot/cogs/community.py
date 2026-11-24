@@ -193,14 +193,17 @@ class CommunityCog(commands.Cog):
                 channel = await guild.fetch_channel(stored[0])
             except discord.NotFound:
                 pass
-        name = f'{title[:55]} {role} · {pid}'
+        legacy_name = f'{title[:55]} {role} · {pid}'
+        name = f'{title[:55]} {role}'
         is_text = role == 'тикет'
         if is_text:
-            name = re.sub(r'[^\w-]+', '-', name.lower()).strip('-')
+            name = re.sub(r'[^\w-]+', '-', legacy_name.lower()).strip('-')
         marker = f'wardenbot:{source}:{pid}:{role}'
         if channel is None:
             channel = next((c for c in category.channels if getattr(c, 'topic', None) == marker or
-                            c.name == name or (not is_text and c.name.endswith(f' {role} · {pid}'))), None)
+                            (is_text and c.name == name) or
+                            (not is_text and isinstance(c, discord.VoiceChannel) and
+                             c.name.endswith(f' {role} · {pid}'))), None)
         if source == 'operation' and role == 'подготовка' and isinstance(channel, discord.TextChannel):
             # Discord cannot convert a text channel to voice. Delete only the tracked/marked old room.
             await self.delete_room(guild, source, pid, channel)
@@ -214,7 +217,15 @@ class CommunityCog(commands.Cog):
             if is_text:
                 channel = await guild.create_text_channel(name, category=category, topic=marker, overwrites=perms)
             else:
-                channel = await guild.create_voice_channel(name, category=category, overwrites=perms)
+                # Keep a recoverable marker until SQLite owns the channel ID. Hide the
+                # staging room from participants; grant access with its final name.
+                staging_perms = {guild.default_role: perms[guild.default_role], guild.me: perms[guild.me]}
+                channel = await guild.create_voice_channel(legacy_name, category=category, overwrites=staging_perms)
+        # Persist BEFORE renaming: a crash must never leave an unidentifiable voice room.
+        if not stored or stored[0] != channel.id:
+            await self.bot.db.write(lambda conn: conn.execute(
+                'INSERT INTO activity_rooms VALUES (?,?,?,?,?) ON CONFLICT(guild_id,source,source_id,role) DO UPDATE SET channel_id=excluded.channel_id',
+                (guild.id, source, pid, role, channel.id)))
         changes = {}
         if channel.overwrites != perms:
             changes['overwrites'] = perms
@@ -231,10 +242,6 @@ class CommunityCog(commands.Cog):
                             'Доступ к войсу закрыт, но для отключения уже подключённого игрока '
                             'боту нужно право «Перемещать участников» (move_members).')
                     await member.move_to(None, reason='Доступ к группе или операции отозван')
-        if not stored or stored[0] != channel.id:
-            await self.bot.db.write(lambda conn: conn.execute(
-                'INSERT INTO activity_rooms VALUES (?,?,?,?,?) ON CONFLICT(guild_id,source,source_id,role) DO UPDATE SET channel_id=excluded.channel_id',
-                (guild.id, source, pid, role, channel.id)))
         return channel
 
     async def delete_room(self, guild, source, pid, channel):
