@@ -7,7 +7,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 import discord
 from discord import app_commands
@@ -29,7 +29,7 @@ from ..ranks import noshow_block_until
 from ..render import Card, OpView, SlotView, SupplyView, build_card, thread_title
 from ..services import interaction_errors, audit, channel_mention, evaluate_member, get_role, get_text_channel, report_error, reply, utcnow
 from ..slots import SlotSpec, SupplySpec, parse_slots, parse_supply, parse_supply_progress
-from ..timeutil import ParseError, from_iso, parse_duration_hours, parse_local_datetime, resolve_tz, tz_from_name
+from ..timeutil import ParseError, from_iso, to_iso, parse_duration_hours, parse_local_datetime, resolve_tz, tz_from_name
 
 log = logging.getLogger(__name__)
 DRAFT_TTL = timedelta(minutes=45)
@@ -127,38 +127,24 @@ class BasicsModal(discord.ui.Modal):
         self.cog, self.draft, self.lang = cog, draft, lang
         raw = draft.raw1
         self.f_title = discord.ui.TextInput(label=t("op_f_title", lang), default=raw.get("title"), max_length=80)
-        self.f_region = discord.ui.TextInput(label=t("op_f_region", lang), default=raw.get("region"), required=False, max_length=40)
-        self.f_start = discord.ui.TextInput(
-            label="Когда начинаем? Например: завтра 20:30", default=raw.get("start"), max_length=40, placeholder="сегодня 20:30 / завтра 19:00 / через 30 минут",
-        )
-        self.f_duration = discord.ui.TextInput(label=t("op_f_duration", lang), default=raw.get("duration") or "2", placeholder="2 = два часа; 90m = полтора часа", max_length=12)
-        self.f_req = discord.ui.TextInput(
-            label=t("op_f_requirements", lang), default=raw.get("requirements"), required=False,
-            style=discord.TextStyle.paragraph, max_length=400,
-        )
-        for item in (self.f_title, self.f_region, self.f_start, self.f_duration, self.f_req):
+        self.f_public = discord.ui.TextInput(label='Что будем делать?', default=draft.raw2.get('public'),
+                                              required=False, style=discord.TextStyle.paragraph, max_length=1500)
+        for item in (self.f_title, self.f_public):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         d, lang = self.draft, self.lang
-        d.raw1 = {
-            "title": self.f_title.value.strip(), "region": self.f_region.value.strip(),
-            "start": self.f_start.value.strip(), "duration": self.f_duration.value.strip(),
-            "requirements": self.f_req.value.strip(),
-        }
-        try:
-            d.start_at = parse_local_datetime(d.raw1["start"], tz_from_name(d.tz_name), utcnow())
-            d.duration_min = parse_duration_hours(d.raw1["duration"])
-        except ParseError as exc:
-            d.start_at = None
-            await respond_draft(interaction, parse_error_text(exc, lang), None, DraftView(self.cog, d, lang, "basics"))
-            return
-        if d.slots:
+        if interaction.user.id != d.organizer_id:
+            await reply(interaction, t('err_no_perm', lang)); return
+        d.raw1['title'] = self.f_title.value.strip()
+        d.raw2['public'] = self.f_public.value.strip()
+        if not d.slots:
+            d.slots = [SlotSpec('Участник', 20)]
+        if d.start_at:
             await self.cog.show_preview(interaction, d, lang)
         else:
-            await respond_draft(
-                interaction, t("op_draft_basic", lang, tz=d.tz_name), None, DraftView(self.cog, d, lang, "details"),
-            )
+            await respond_draft(interaction, f'Когда начинаем? Часовой пояс: {d.tz_name}.', None,
+                                DateChoices(self.cog, d, lang))
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         await report_error(interaction.client, interaction, error, "operation basics modal")  # type: ignore[arg-type]
@@ -169,8 +155,8 @@ class DetailsModal(discord.ui.Modal):
         super().__init__(title=t("op_modal2_title", lang), timeout=900)
         self.cog, self.draft, self.lang = cog, draft, lang
         raw = draft.raw2
-        default_slots = raw.get("slots") or DEFAULT_SLOTS.get(draft.type, "")
-        default_supply = raw.get("supply") if "supply" in raw else ("" if draft.type in NO_SUPPLY_TYPES else DEFAULT_SUPPLY)
+        default_slots = raw.get("slots") or '\n'.join(f'{s.name}: {s.capacity}' for s in draft.slots)
+        default_supply = raw.get("supply", "")
         para = discord.TextStyle.paragraph
         self.f_public = discord.ui.TextInput(label=t("op_f_public", lang), default=raw.get("public"), required=False, style=para, max_length=1500)
         self.f_closed = discord.ui.TextInput(label=t("op_f_closed", lang), default=raw.get("closed"), required=False, style=para, max_length=1500)
@@ -198,6 +184,140 @@ class DetailsModal(discord.ui.Modal):
         await report_error(interaction.client, interaction, error, "operation details modal")  # type: ignore[arg-type]
 
 
+class DateChoices(discord.ui.View):
+    def __init__(self, cog, draft, lang):
+        super().__init__(timeout=1800)
+        self.cog, self.draft, self.lang = cog, draft, lang
+        for label, minutes in (('Через 30 минут', 30), ('Через час', 60), ('Через 2 часа', 120)):
+            button = discord.ui.Button(label=label)
+            async def quick(interaction, amount=minutes):
+                if interaction.user.id != draft.organizer_id:
+                    await reply(interaction, t('err_no_perm', lang)); return
+                draft.start_at = utcnow() + timedelta(minutes=amount)
+                await cog.show_preview(interaction, draft, lang)
+            button.callback = quick
+            self.add_item(button)
+        for label, offset in (('Сегодня', 0), ('Завтра', 1), ('Выбрать день', None), ('Позже', None)):
+            button = discord.ui.Button(label=label)
+            async def choose(interaction, day=offset, later=label == 'Позже'):
+                if interaction.user.id != draft.organizer_id:
+                    await reply(interaction, t('err_no_perm', lang)); return
+                picker = DatePicker(cog, draft, lang, fixed_day=day, page=1 if later else 0)
+                await respond_draft(interaction, picker.prompt(), None, picker)
+            button.callback = choose
+            self.add_item(button)
+
+
+class ExactTimeModal(discord.ui.Modal):
+    def __init__(self, picker):
+        super().__init__(title='Точное время')
+        self.picker = picker
+        self.clock = discord.ui.TextInput(label='Время в формате ЧЧ:ММ',
+                                          placeholder='Например, 20:10', max_length=5)
+        self.add_item(self.clock)
+
+    async def on_submit(self, interaction):
+        if interaction.user.id != self.picker.draft.organizer_id:
+            await reply(interaction, t('err_no_perm', self.picker.lang)); return
+        match = re.fullmatch(r'([01]?\d|2[0-3]):([0-5]\d)', self.clock.value.strip())
+        if not match:
+            await reply(interaction, 'Введите время как ЧЧ:ММ, например 20:10.'); return
+        self.picker.hour, self.picker.minute = int(match[1]), int(match[2])
+        await self.picker.confirm(interaction)
+
+
+class DatePicker(discord.ui.View):
+    """Pick a local calendar day and time without asking users for a date format."""
+    def __init__(self, cog, draft, lang, fixed_day=None, page=0, selected=None, hour=20, minute=0):
+        super().__init__(timeout=1800)
+        self.cog, self.draft, self.lang = cog, draft, lang
+        self.fixed_day, self.page, self.hour, self.minute = fixed_day, page, hour, minute
+        today = utcnow().astimezone(tz_from_name(draft.tz_name)).date()
+        self.day = selected or (today + timedelta(days=fixed_day or page * 14))
+        if fixed_day is None:
+            days = [today + timedelta(days=page * 14 + n) for n in range(14)]
+            selector = discord.ui.Select(placeholder='День операции', options=[
+                discord.SelectOption(label=f'{d.strftime("%d.%m.%Y")} · {("пн", "вт", "ср", "чт", "пт", "сб", "вс")[d.weekday()]}',
+                                     value=d.isoformat(), default=d == self.day) for d in days])
+            async def set_day(interaction):
+                if interaction.user.id != draft.organizer_id:
+                    await reply(interaction, t('err_no_perm', lang)); return
+                self.day = datetime.fromisoformat(selector.values[0]).date()
+                await self.update(interaction)
+            selector.callback = set_day
+            self.add_item(selector)
+        hours = discord.ui.Select(placeholder='Час', options=[discord.SelectOption(
+            label=f'{n:02d}', value=str(n), default=n == hour) for n in range(24)])
+        async def set_hour(interaction):
+            if interaction.user.id != draft.organizer_id:
+                await reply(interaction, t('err_no_perm', lang)); return
+            self.hour = int(hours.values[0]); await self.update(interaction)
+        hours.callback = set_hour
+        self.add_item(hours)
+        minutes = discord.ui.Select(placeholder='Минуты', options=[discord.SelectOption(
+            label=f'{n:02d}', value=str(n), default=n == minute) for n in (0, 15, 30, 45)])
+        async def set_minute(interaction):
+            if interaction.user.id != draft.organizer_id:
+                await reply(interaction, t('err_no_perm', lang)); return
+            self.minute = int(minutes.values[0]); await self.update(interaction)
+        minutes.callback = set_minute
+        self.add_item(minutes)
+        confirm = discord.ui.Button(label='Подтвердить время', style=discord.ButtonStyle.success)
+        confirm.callback = self.confirm
+        self.add_item(confirm)
+        exact = discord.ui.Button(label='Другое время')
+        async def exact_time(interaction):
+            if interaction.user.id != draft.organizer_id:
+                await reply(interaction, t('err_no_perm', lang)); return
+            await interaction.response.send_modal(ExactTimeModal(self))
+        exact.callback = exact_time
+        self.add_item(exact)
+
+    def prompt(self):
+        return f'Начало: {self.day:%d.%m.%Y}, {self.hour:02d}:{self.minute:02d} · {self.draft.tz_name}. Выберите день и время, затем подтвердите.'
+
+    async def update(self, interaction):
+        if interaction.user.id != self.draft.organizer_id:
+            await reply(interaction, t('err_no_perm', self.lang)); return
+        await interaction.response.edit_message(content=self.prompt(), view=self)
+
+    async def confirm(self, interaction):
+        if interaction.user.id != self.draft.organizer_id:
+            await reply(interaction, t('err_no_perm', self.lang)); return
+        local = f'{self.day.isoformat()} {self.hour:02d}:{self.minute:02d}'
+        try:
+            candidate = parse_local_datetime(local, tz_from_name(self.draft.tz_name), utcnow())
+        except ParseError as exc:
+            await reply(interaction, parse_error_text(exc, self.lang)); return
+        if candidate <= utcnow():
+            await reply(interaction, 'Это время уже прошло. Выберите более позднее время или другой день.'); return
+        self.draft.start_at = candidate
+        await self.cog.show_preview(interaction, self.draft, self.lang)
+
+
+class ScheduleEditor:
+    """Use the same date picker for a published operation."""
+    def __init__(self, cog, op_id, revision):
+        self.cog, self.op_id, self.revision = cog, op_id, revision
+
+    async def show_preview(self, interaction, draft, lang):
+        op = await self.cog.bot.db.read(repo.op_get, self.op_id)
+        if op is None or op['revision'] != self.revision:
+            await reply(interaction, 'Операция уже изменена. Откройте управление заново.'); return
+        fields = {key: op[key] for key in ('title', 'region', 'type', 'start_at', 'timezone', 'duration_min',
+                                            'requirements', 'briefing_public', 'briefing_closed')}
+        fields['start_at'] = to_iso(draft.start_at)
+        slots = [SlotSpec(r['name'], r['capacity']) for r in await self.cog.bot.db.read(repo.op_slots, self.op_id)]
+        supply = [SupplySpec(r['name'], r['needed']) for r in await self.cog.bot.db.read(repo.op_supply, self.op_id)]
+        try:
+            await self.cog.mutate(interaction, self.op_id, ops.edit, self.revision, fields, slots, supply, utcnow())
+        except (ops.OperationError, ParseError) as error:
+            await reply(interaction, str(error)); return
+        self.cog.request_refresh(self.op_id)
+        await respond_draft(interaction, f'Новое начало: <t:{int(draft.start_at.timestamp())}:F>. Участники получат уведомление.',
+                            None, None)
+
+
 class DraftView(discord.ui.View):
     """Ephemeral helper under the draft. Stage: basics | details | ready."""
 
@@ -210,8 +330,9 @@ class DraftView(discord.ui.View):
             self._add(t("op_btn_details", lang), discord.ButtonStyle.primary, self.open_details)
         else:
             self._add(t("op_btn_publish", lang), discord.ButtonStyle.success, self.publish)
-            self._add(t("op_btn_details", lang), discord.ButtonStyle.secondary, self.open_details)
-            self._add(("Основное" if lang == "ru" else "Basics"), discord.ButtonStyle.secondary, self.open_basics)
+            self._add('Изменить время', discord.ButtonStyle.secondary, self.change_time)
+            self._add('Название и описание', discord.ButtonStyle.secondary, self.open_basics)
+            self._add('Дополнительные настройки', discord.ButtonStyle.secondary, self.open_details)
             self._add(t("op_btn_cancel", lang), discord.ButtonStyle.danger, self.discard)
 
     def _add(self, label: str, style: discord.ButtonStyle, handler) -> None:
@@ -231,6 +352,10 @@ class DraftView(discord.ui.View):
 
     async def open_details(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(DetailsModal(self.cog, self.draft, self.lang))
+
+    async def change_time(self, interaction: discord.Interaction) -> None:
+        await respond_draft(interaction, f'Когда начинаем? Часовой пояс: {self.draft.tz_name}.', None,
+                            DateChoices(self.cog, self.draft, self.lang))
 
     async def discard(self, interaction: discord.Interaction) -> None:
         self.cog.drafts.pop(self.draft.organizer_id, None)
@@ -437,7 +562,14 @@ class ManageView(discord.ui.View):
         await self.editor(interaction,'basics')
 
     async def edit_schedule(self,interaction):
-        await self.editor(interaction,'schedule')
+        op = await self._guard(interaction)
+        if op is None:
+            return
+        draft = Draft(op['guild_id'], interaction.user.id, op['type'], op['language'],
+                      op['timezone'], utcnow())
+        editor = ScheduleEditor(self.cog, self.op_id, op['revision'])
+        await respond_draft(interaction, f'Выберите новое время. Часовой пояс: {draft.tz_name}.',
+                            None, DateChoices(editor, draft, self.lang))
 
     async def edit_briefing(self,interaction):
         await self.editor(interaction,'details')
@@ -762,7 +894,10 @@ class OperationsCog(commands.Cog):
 
     async def show_preview(self, interaction: discord.Interaction, d: Draft, lang: str) -> None:
         embed = card_embed(build_card(d.preview_view()))
-        await respond_draft(interaction, t("op_draft_ready", lang), embed, DraftView(self, d, lang, "ready"))
+        local = d.start_at.astimezone(tz_from_name(d.tz_name))
+        when = f'{local:%d.%m.%Y %H:%M} · {d.tz_name} (<t:{int(d.start_at.timestamp())}:R>)'
+        await respond_draft(interaction, f'Начало: {when}. Проверьте карточку и опубликуйте.',
+                            embed, DraftView(self, d, lang, "ready"))
 
     # -------------------------------------------------------- slash commands --
     operation = app_commands.Group(name="operation", description="Operations · Операции", guild_only=True)
