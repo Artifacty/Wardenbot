@@ -158,6 +158,8 @@ CATEGORIES: tuple[CategoryDef, ...] = (
             "Verification button. You cannot post here; the bot replies only to you.", "public", "ro"),
         _ch("news", "text", "⬢", "новости", "news", "📰",
             "Новости сервера и бота.", "Server and bot news.", "recruit", "ro"),
+        _ch("unsecure", "text", "⬢", "unsecure", "unsecure", "",
+            "Открытый канал до проверки.", "Open chat before verification.", "public", "chat"),
     )),
     CategoryDef("hq", "01", "ШТАБ", "HQ", "🏛️", "private", (
         _ch("feedback", "forum", "▤", "предложения", "feedback", "💡",
@@ -186,18 +188,18 @@ CATEGORIES: tuple[CategoryDef, ...] = (
         _ch("after_action", "forum", "▤", "отчёты", "after-action", "📊",
             "Итоги операций и посещаемость.", "Operation results and attendance.", "private", "forum_open", launch=False),
     )),
-    CategoryDef("logistics", "03", "ЛОГИСТИКА", "LOGI", "🚚", "recruit", (
+    CategoryDef("logistics", "03", "ЛОГИСТИКА", "LOGI", "🚚", "command", (
         _ch("sell", "forum", "▤", "продажа", "sell", "🏷️",
             "Продажа внутриигровых материалов и техники. Срок жизни 7–14 дней.",
-            "Selling in-game materials and vehicles. Listings live 7-14 days.", "recruit", "forum_open",
+            "Selling in-game materials and vehicles. Listings live 7-14 days.", "command", "forum_open",
             guidelines="Укажите: что, сколько, где передать. State what, how much and where to hand it over."),
         _ch("buy", "forum", "▤", "покупка", "buy", "🛒",
-            "Покупка внутриигровых материалов и техники.", "Buying in-game materials and vehicles.", "recruit", "forum_open",
+            "Покупка внутриигровых материалов и техники.", "Buying in-game materials and vehicles.", "command", "forum_open",
             guidelines="Укажите: что, сколько, где передать. State what, how much and where to hand it over."),
         _ch("services", "forum", "▤", "услуги", "services", "🔧",
-            "Перевозка, производство, фронтовая логистика.", "Hauling, production, front-line logistics.", "recruit", "forum_open", launch=False),
+            "Перевозка, производство, фронтовая логистика.", "Hauling, production, front-line logistics.", "command", "forum_open", launch=False),
     )),
-    CategoryDef("units", "04", "ПОЛКИ", "UNITS", "🪖", "recruit", (
+    CategoryDef("units", "03", "ПОЛКИ", "UNITS", "🪖", "recruit", (
         _ch("recruitment", "forum", "▤", "набор", "recruitment", "📣",
             "Карточки набора от полков.", "Recruitment cards from regiments.", "recruit", "forum_open",
             guidelines="Объявления о наборе ведут командиры и офицеры полка. Recruitment posts by regiment officers only."),
@@ -206,20 +208,20 @@ CATEGORIES: tuple[CategoryDef, ...] = (
         _ch("commanders", "text", "▨", "командиры", "commanders", "🎖️",
             "Дипломатия и координация между полками.", "Diplomacy and coordination between regiments.", "co", "chat"),
     )),
-    CategoryDef("comms", "05", "СВЯЗЬ", "COMMS", "📡", "recruit", (
-        _ch("general_ru", "text", "⬡", "общий", "general-ru", "🇷🇺",
-            "Русскоязычный общий чат.", "Russian-language general chat.", "recruit", "chat", allies=True),
-        _ch("general_en", "text", "⬡", "general", "general-en", "🇬🇧",
-            "English general chat.", "Английский общий чат.", "recruit", "chat", allies=True),
+    CategoryDef("comms", "04", "СВЯЗЬ", "COMMS", "📡", "recruit", (
+        _ch("general_ru", "text", "⬡", "общий", "general-ru", "",
+            "Общий чат сообщества.", "Community general chat.", "recruit", "chat", allies=True),
+        _ch("general_en", "text", "⬡", "картинки", "pictures", "",
+            "Скриншоты и изображения сообщества.", "Community screenshots and images.", "recruit", "chat", allies=True),
         _ch("questions", "forum", "▤", "вопросы", "questions", "❓",
             "Вопросы новичков и ответы наставников.", "Newcomer questions and mentor answers.", "recruit", "forum_open", launch=False),
         _ch("guides", "forum", "▤", "гайды", "guides", "📚",
             "Гайды по игре и по серверу.", "Game and server guides.", "recruit", "forum_open", launch=False),
     )),
-    CategoryDef("voice", "06", "ГОЛОС", "VOICE", "🎙️", "recruit", (
-        _ch("muster_ru", "voice", "◉", "сбор-ru", "muster-ru", "📢",
+    CategoryDef("voice", "05", "ГОЛОС", "VOICE", "🎙️", "recruit", (
+        _ch("muster_ru", "voice", "◉", "Общий 1", "General 1", "📢",
             "Сбор перед операцией, русский язык.", "Pre-operation muster, Russian.", "recruit", "voice"),
-        _ch("muster_en", "voice", "◉", "сбор-en", "muster-en", "📢",
+        _ch("muster_en", "voice", "◉", "Общий 2", "General 2", "📢",
             "Сбор перед операцией, английский язык.", "Pre-operation muster, English.", "recruit", "voice"),
         _ch("mixed", "voice", "◉", "смешанный", "mixed", "🌐",
             "Смешанный состав, оба языка.", "Mixed group, both languages.", "recruit", "voice", allies=True),
@@ -228,7 +230,7 @@ CATEGORIES: tuple[CategoryDef, ...] = (
         _ch("create", "voice", "◉", "создать", "create", "➕",
             "Вход создаёт временный канал операции.", "Joining creates a temporary operation channel.", "private", "voice", launch=False),
     )),
-    CategoryDef("command", "08", "КОМАНДОВАНИЕ", "COMMAND", "⭐", "staff", (
+    CategoryDef("command", "06", "КОМАНДОВАНИЕ", "COMMAND", "⭐", "staff", (
         _ch("mod", "text", "▨", "модерация", "mod", "🛡️",
             "Рабочий чат модераторов.", "Moderators' working chat.", "staff", "chat"),
         _ch("screening", "text", "▨", "допуск-очередь", "screening", "🔍",

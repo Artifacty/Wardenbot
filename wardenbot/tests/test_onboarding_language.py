@@ -43,7 +43,7 @@ def test_required_languages_and_access_layout():
     assert {'Admin','Moderator','Clan Leader','Clan Delegate','Unverified',
             'Verification Rejected','Verified','Member','Veteran'} <= set(names)
     assert set(viewer_roles('screening')) == {'staff', 'command'}
-    assert {c.key for cat in CATEGORIES for c in cat.channels if c.access == 'public'} == {'rules','start','verify'}
+    assert {c.key for cat in CATEGORIES for c in cat.channels if c.access == 'public'} == {'rules','start','verify','unsecure'}
     for key in ('rules','start','verify'):
         ch = CHANNEL_BY_KEY[key]
         assert not re.search('[А-Яа-яЁё]', ch.name() + ch.topic)
@@ -142,7 +142,7 @@ def test_missing_target_does_not_remove_existing_roles():
     asyncio.run(go())
 
 
-def test_setup_reuses_role_ids_and_preserves_trading_channels():
+def test_setup_reuses_role_ids_and_closes_trading_channels():
     async def go():
         bot = WardenBot(Config(token='unused'), storage.Database(':memory:'))
         guild = MagicMock()
@@ -171,7 +171,74 @@ def test_setup_reuses_role_ids_and_preserves_trading_channels():
         guild.get_channel.return_value = existing
         bot.cfg(1)['ch.sell'] = '123'
         assert await cog._ensure_channel(guild, MagicMock(), CHANNEL_BY_KEY['sell'], roles, True, []) is existing
-        existing.edit.assert_awaited_once_with(name=CHANNEL_BY_KEY['sell'].name(), reason='Русское название')
+        changes = existing.edit.call_args.kwargs
+        assert changes['name'] == CHANNEL_BY_KEY['sell'].name()
+        assert 'category' in changes
+        assert changes['overwrites'][guild.default_role].view_channel is False
+        assert changes['overwrites'][roles['command']].view_channel is True
+        assert roles['recruit'] not in changes['overwrites']
+        bot.db.close()
+    asyncio.run(go())
+
+
+def test_setup_reuses_old_categories_and_locks_every_logistics_channel():
+    async def go():
+        bot = WardenBot(Config(token='unused'), storage.Database(':memory:'))
+        cog = SetupCog(bot)
+        guild = MagicMock()
+        guild.id = 1
+        admin = MagicMock(spec=discord.Role)
+        recruit = MagicMock(spec=discord.Role)
+        roles = {'command': admin, 'recruit': recruit}
+        category = MagicMock(spec=discord.CategoryChannel)
+        category.name = '03 // ЛОГИСТИКА 🚚'
+        category.id = 50
+        category.edit = AsyncMock()
+        extra = MagicMock(spec=discord.TextChannel)
+        extra.id = 51
+        extra.name = 'дополнительный-канал'
+        extra.edit = AsyncMock()
+        category.channels = [extra]
+        guild.categories = [category]
+        guild.get_channel.return_value = None
+        assert await cog._ensure_category(guild, next(c for c in CATEGORIES if c.key == 'logistics'), roles, []) is category
+        category_permissions = category.edit.call_args.kwargs['overwrites']
+        assert category_permissions[guild.default_role].view_channel is False
+        assert category_permissions[admin].view_channel is True
+        assert recruit not in category_permissions
+        await cog._lock_logistics_children(guild, category, roles, set(), [])
+        child_permissions = extra.edit.call_args.kwargs['overwrites']
+        assert child_permissions[guild.default_role].view_channel is False
+        assert child_permissions[admin].view_channel is True
+        assert recruit not in child_permissions
+        bot.db.close()
+    asyncio.run(go())
+
+
+def test_setup_reuses_renamed_categories_and_channels():
+    async def go():
+        bot = WardenBot(Config(token='unused'), storage.Database(':memory:'))
+        cog = SetupCog(bot)
+        guild = MagicMock()
+        guild.id = 1
+        guild.get_channel.return_value = None
+        category = MagicMock(spec=discord.CategoryChannel)
+        category.id = 50
+        category.name = '05 // СВЯЗЬ 📡'
+        category.edit = AsyncMock()
+        guild.categories = [category]
+        roles = {'recruit': MagicMock(spec=discord.Role), 'staff': MagicMock(spec=discord.Role),
+                 'command': MagicMock(spec=discord.Role)}
+        assert await cog._ensure_category(guild, next(c for c in CATEGORIES if c.key == 'comms'), roles, []) is category
+        assert bot.cfg(1)['cat.comms'] == '50'
+        old = MagicMock(spec=discord.TextChannel)
+        old.id = 51
+        old.name = '⬡┃general🇬🇧'
+        old.edit = AsyncMock()
+        category.channels = [old]
+        assert await cog._ensure_channel(guild, category, CHANNEL_BY_KEY['general_en'], roles, False, []) is old
+        assert bot.cfg(1)['ch.general_en'] == '51'
+        old.edit.assert_awaited_once_with(name=CHANNEL_BY_KEY['general_en'].name(), reason='Русское название')
         bot.db.close()
     asyncio.run(go())
 

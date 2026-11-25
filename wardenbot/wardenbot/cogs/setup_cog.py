@@ -17,7 +17,7 @@ from ..i18n import user_language, t
 from ..invite import role_permissions
 from ..layout import CATEGORIES, ROLES, LEGACY_ROLE_KEYS, CategoryDef, ChannelDef, role_display_name
 from ..invite import required_permission_names
-from ..perm_layout import category_overwrites, channel_overwrites
+from ..perm_layout import bot_overwrite, category_overwrites, channel_overwrites
 from ..perms import can_admin
 from ..services import BLUE, audit, get_text_channel, reply
 
@@ -26,6 +26,16 @@ TEXTS = Path(__file__).resolve().parent.parent / "texts"
 
 AUTOMOD_NAME = "Warden: stockpile codes"
 AUTOMOD_REGEX = r"\b\d{6}\b"  # Discord uses Rust regex: no lookaround
+
+# Names used before the numbered categories and voice channels were renamed.
+# Reuse them when the saved ID is missing, so /setup run does not duplicate channels.
+OLD_CATEGORY_NUMBERS = {"units": "04", "comms": "05", "voice": "06", "command": "08"}
+OLD_CHANNEL_NAMES = {
+    "general_ru": "⬡┃общий🇷🇺",
+    "general_en": "⬡┃general🇬🇧",
+    "muster_ru": "◉┃сбор-ru📢",
+    "muster_en": "◉┃сбор-en📢",
+}
 
 
 def read_text(name: str) -> str:
@@ -114,14 +124,17 @@ class SetupCog(commands.Cog):
         if stored and stored.isdigit():
             existing = guild.get_channel(int(stored))
         if existing is None:
-            existing = next((item for item in guild.categories if item.name in (
-                cat.name, f"{cat.number} // {cat.ru} · {cat.en} {cat.emoji}")), None)
+            old_number = OLD_CATEGORY_NUMBERS.get(cat.key, cat.number)
+            names = (cat.name, f"{cat.number} // {cat.ru} · {cat.en} {cat.emoji}",
+                     f"{old_number} // {cat.ru} {cat.emoji}",
+                     f"{old_number} // {cat.ru} · {cat.en} {cat.emoji}")
+            existing = next((item for item in guild.categories if item.name in names), None)
             if existing is not None:
                 await self.bot.set_cfg(guild.id, f"cat.{cat.key}", existing.id)
         overwrites = self._target_overwrites(category_overwrites(cat), roles, guild)
         if isinstance(existing, discord.CategoryChannel):
             changes = {"name": cat.name, "reason": "Русское название категории"}
-            if cat.key in ("entry", "command"):
+            if cat.key in ("entry", "command", "logistics"):
                 changes["overwrites"] = overwrites
             await existing.edit(**changes)
             return existing
@@ -142,7 +155,7 @@ class SetupCog(commands.Cog):
             existing = guild.get_channel(int(stored))
         if existing is None:
             candidates = guild.channels if ch.key == "feedback" else category.channels
-            existing = next((item for item in candidates if item.name == name), None)
+            existing = next((item for item in candidates if item.name in (name, OLD_CHANNEL_NAMES.get(ch.key))), None)
             if existing is not None:
                 await self.bot.set_cfg(guild.id, f"ch.{ch.key}", existing.id)
         overwrites = self._target_overwrites(channel_overwrites(ch), roles, guild)
@@ -152,13 +165,11 @@ class SetupCog(commands.Cog):
                 await existing.edit(name=name, category=category, overwrites=overwrites,
                                     topic=ch.guidelines, reason="Форум предложений в ШТАБЕ")
                 return existing
-            # Trading channels and their configured permissions are explicitly preserved.
-            if ch.key in ("sell", "buy", "services"):
-                await existing.edit(name=name, reason="Русское название")
-                return existing
             policy_channel = ch.access in ("public", "staff", "screening", "command") or ch.key == "news"
             if policy_channel:
                 changes = dict(name=name, overwrites=overwrites, reason="Язык и доступ канала")
+                if ch.key in ("sell", "buy", "services"):
+                    changes["category"] = category
                 if ch.kind != "voice":
                     changes['topic'] = ch.topic
                 await existing.edit(**changes)
@@ -190,6 +201,21 @@ class SetupCog(commands.Cog):
         await self.bot.set_cfg(guild.id, f"ch.{ch.key}", created.id)
         log_lines.append(f"Создан канал: {created.name}")
         return created
+
+    async def _lock_logistics_children(
+        self, guild: discord.Guild, category: discord.CategoryChannel,
+        roles: dict[str, discord.Role], managed_ids: set[int], log_lines: list[str],
+    ) -> None:
+        """Existing extra channels must not bypass the category deny via their own overwrites."""
+        overwrites = self._target_overwrites({
+            "everyone": discord.PermissionOverwrite(view_channel=False),
+            "command": discord.PermissionOverwrite(view_channel=True),
+            "bot": bot_overwrite(),
+        }, roles, guild)
+        for child in category.channels:
+            if child.id not in managed_ids:
+                await child.edit(overwrites=overwrites, reason="Логистика доступна только администраторам")
+                log_lines.append(f"Закрыт канал логистики: {child.name}")
 
     # ------------------------------------------------------------- automod --
     async def _ensure_automod(self, guild: discord.Guild, log_lines: list[str]) -> None:
@@ -345,8 +371,12 @@ class SetupCog(commands.Cog):
                     if not chans:
                         continue
                     category = await self._ensure_category(guild, cat, roles, lines)
+                    managed_ids: set[int] = set()
                     for ch in chans:
-                        await self._ensure_channel(guild, category, ch, roles, fix_permissions, lines)
+                        channel = await self._ensure_channel(guild, category, ch, roles, fix_permissions, lines)
+                        managed_ids.add(channel.id)
+                    if cat.key == "logistics":
+                        await self._lock_logistics_children(guild, category, roles, managed_ids, lines)
                 await self._ensure_automod(guild, lines)
                 if guild_settings:
                     await self._guild_settings(guild, lines)
