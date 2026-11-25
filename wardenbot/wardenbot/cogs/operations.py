@@ -234,6 +234,7 @@ class DatePicker(discord.ui.View):
         self.fixed_day, self.page, self.hour, self.minute = fixed_day, page, hour, minute
         today = utcnow().astimezone(tz_from_name(draft.tz_name)).date()
         self.day = selected or (today + timedelta(days=fixed_day or page * 14))
+        self.day_select = None
         if fixed_day is None:
             days = [today + timedelta(days=page * 14 + n) for n in range(14)]
             selector = discord.ui.Select(placeholder='День операции', options=[
@@ -246,6 +247,7 @@ class DatePicker(discord.ui.View):
                 await self.update(interaction)
             selector.callback = set_day
             self.add_item(selector)
+            self.day_select = selector
         hours = discord.ui.Select(placeholder='Час', options=[discord.SelectOption(
             label=f'{n:02d}', value=str(n), default=n == hour) for n in range(24)])
         async def set_hour(interaction):
@@ -254,6 +256,7 @@ class DatePicker(discord.ui.View):
             self.hour = int(hours.values[0]); await self.update(interaction)
         hours.callback = set_hour
         self.add_item(hours)
+        self.hour_select = hours
         minutes = discord.ui.Select(placeholder='Минуты', options=[discord.SelectOption(
             label=f'{n:02d}', value=str(n), default=n == minute) for n in (0, 15, 30, 45)])
         async def set_minute(interaction):
@@ -262,6 +265,7 @@ class DatePicker(discord.ui.View):
             self.minute = int(minutes.values[0]); await self.update(interaction)
         minutes.callback = set_minute
         self.add_item(minutes)
+        self.minute_select = minutes
         confirm = discord.ui.Button(label='Подтвердить время', style=discord.ButtonStyle.success)
         confirm.callback = self.confirm
         self.add_item(confirm)
@@ -276,9 +280,20 @@ class DatePicker(discord.ui.View):
     def prompt(self):
         return f'Начало: {self.day:%d.%m.%Y}, {self.hour:02d}:{self.minute:02d} · {self.draft.tz_name}. Выберите день и время, затем подтвердите.'
 
+    def _sync_defaults(self):
+        """Discord renders Select defaults from options, not from this view's state."""
+        if self.day_select is not None:
+            for option in self.day_select.options:
+                option.default = option.value == self.day.isoformat()
+        for option in self.hour_select.options:
+            option.default = option.value == str(self.hour)
+        for option in self.minute_select.options:
+            option.default = option.value == str(self.minute)
+
     async def update(self, interaction):
         if interaction.user.id != self.draft.organizer_id:
             await reply(interaction, t('err_no_perm', self.lang)); return
+        self._sync_defaults()
         await interaction.response.edit_message(content=self.prompt(), view=self)
 
     async def confirm(self, interaction):

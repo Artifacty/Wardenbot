@@ -58,6 +58,29 @@ def test_quick_time_and_exact_minutes(monkeypatch):
     asyncio.run(go())
 
 
+def test_picker_defaults_follow_visible_selection(monkeypatch):
+    async def go():
+        fixed = datetime(2026, 11, 25, 12, tzinfo=UTC)
+        monkeypatch.setattr('wardenbot.cogs.operations.utcnow', lambda: fixed)
+        draft = Draft(1, 10, 'defense', 'ru', 'Europe/Moscow', fixed)
+        cog = SimpleNamespace(show_preview=AsyncMock())
+        picker = DatePicker(cog, draft, 'ru')
+        i = interaction()
+        picker.day_select._values = ['2026-12-08']
+        await picker.day_select.callback(i)
+        picker.hour_select._values = ['1']
+        await picker.hour_select.callback(i)
+        picker.minute_select._values = ['30']
+        await picker.minute_select.callback(i)
+        assert '08.12.2026, 01:30' in i.response.edit_message.call_args.kwargs['content']
+        for selector, expected in ((picker.day_select, '2026-12-08'),
+                                   (picker.hour_select, '1'), (picker.minute_select, '30')):
+            assert [option.value for option in selector.options if option.default] == [expected]
+        await picker.confirm(i)
+        assert draft.start_at.astimezone(tz_from_name(draft.tz_name)).strftime('%d.%m.%Y %H:%M') == '08.12.2026 01:30'
+    asyncio.run(go())
+
+
 def test_published_operation_uses_picker_and_saves_new_start(monkeypatch):
     async def go():
         monkeypatch.setattr('wardenbot.cogs.operations.utcnow', lambda: NOW)
