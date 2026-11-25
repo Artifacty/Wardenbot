@@ -425,10 +425,10 @@ class SetupCog(commands.Cog):
             return
         await interaction.response.defer(ephemeral=True)
         cfg = self.bot.cfg(guild.id)
-        from pathlib import Path
         counts=await self.bot.db.read(lambda c:(c.execute("SELECT COUNT(*) FROM notifications WHERE state='pending'").fetchone()[0],
-                    c.execute('SELECT COUNT(*) FROM role_jobs WHERE applied_revision<revision').fetchone()[0]))
-        lines = [f"БД: {Path(self.bot.db.path).resolve().name}; схема {len(MIGRATIONS)}",f"Очереди: уведомления {counts[0]}, роли {counts[1]}",
+                    c.execute('SELECT COUNT(*) FROM role_jobs WHERE applied_revision<revision').fetchone()[0],
+                    c.execute('SELECT COUNT(*) FROM users').fetchone()[0]))
+        lines = [f"БД: {Path(self.bot.db.path).resolve()}; схема {len(MIGRATIONS)}; игроков {counts[2]}",f"Очереди: уведомления {counts[0]}, роли {counts[1]}",
                  f"Message Content Intent: {self.bot.intents.message_content}"]
         for rd in ROLES:
             rid = cfg.get(f"role.{rd.key}")

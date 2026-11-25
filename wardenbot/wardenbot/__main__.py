@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from .bot import WardenBot
 from .config import ConfigError, load_config
@@ -29,6 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with instance_lock(config.db_path):
             db = Database(config.db_path)
+            user_count = db.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            logging.getLogger(__name__).info("SQLite database: %s; player records: %d",
+                                             Path(config.db_path).resolve(), user_count)
             bot = WardenBot(config, db, force_command_sync=args.sync_commands)
             try:
                 bot.run(config.token, log_handler=None)
