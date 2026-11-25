@@ -24,7 +24,7 @@ def test_time_picker_saves_local_date_and_rejects_past(monkeypatch):
         draft = Draft(1, 10, 'defense', 'ru', 'Europe/Moscow', fixed)
         cog = SimpleNamespace(show_preview=AsyncMock())
         picker = DatePicker(cog, draft, 'ru', fixed_day=1, hour=20, minute=30)
-        assert len(picker.children) == 4
+        assert len(picker.children) == 5
         assert picker.day.isoformat() == '2026-11-26'
         await picker.confirm(interaction())
         assert draft.start_at == datetime(2026, 11, 26, 17, 30, tzinfo=UTC)
@@ -45,7 +45,8 @@ def test_quick_time_and_exact_minutes(monkeypatch):
         draft = Draft(1, 10, 'defense', 'ru', 'Europe/Moscow', fixed)
         cog = SimpleNamespace(show_preview=AsyncMock())
         choices = DateChoices(cog, draft, 'ru')
-        assert len(choices.children) == 7
+        assert len(choices.children) == 6
+        assert 'Позже' not in [button.label for button in choices.children]
         await choices.children[0].callback(interaction())
         assert draft.start_at == fixed + timedelta(minutes=30)
         picker = DatePicker(cog, draft, 'ru', fixed_day=1)
@@ -53,7 +54,7 @@ def test_quick_time_and_exact_minutes(monkeypatch):
         form.clock._value = '20:10'
         await form.on_submit(interaction())
         assert draft.start_at.astimezone(tz_from_name(draft.tz_name)).strftime('%H:%M') == '20:10'
-        assert len(DatePicker(cog, draft, 'ru').children) == 5
+        assert len(DatePicker(cog, draft, 'ru').children) == 6
         assert len(DatePicker(cog, draft, 'ru', page=1).children[0].options) == 14
     asyncio.run(go())
 
@@ -78,6 +79,32 @@ def test_picker_defaults_follow_visible_selection(monkeypatch):
             assert [option.value for option in selector.options if option.default] == [expected]
         await picker.confirm(i)
         assert draft.start_at.astimezone(tz_from_name(draft.tz_name)).strftime('%d.%m.%Y %H:%M') == '08.12.2026 01:30'
+    asyncio.run(go())
+
+
+def test_later_button_pages_inside_date_picker(monkeypatch):
+    async def go():
+        fixed = datetime(2026, 11, 25, 12, tzinfo=UTC)
+        monkeypatch.setattr('wardenbot.cogs.operations.utcnow', lambda: fixed)
+        draft = Draft(1, 10, 'defense', 'ru', 'Europe/Moscow', fixed)
+        cog = SimpleNamespace(show_preview=AsyncMock())
+        first = DatePicker(cog, draft, 'ru', hour=21, minute=30)
+        later = next(button for button in first.children if isinstance(button, discord.ui.Button)
+                     and button.label == 'Позже')
+        i = interaction()
+        await later.callback(i)
+        second = i.response.edit_message.call_args.kwargs['view']
+        assert second.page == 1
+        assert second.day.isoformat() == '2026-12-09'
+        assert (second.hour, second.minute) == (21, 30)
+        assert '09.12.2026, 21:30' in i.response.edit_message.call_args.kwargs['content']
+        assert [option.value for option in second.day_select.options if option.default] == ['2026-12-09']
+        earlier = next(button for button in second.children if isinstance(button, discord.ui.Button)
+                       and button.label == 'Раньше')
+        await earlier.callback(i)
+        back = i.response.edit_message.call_args.kwargs['view']
+        assert back.page == 0 and back.day.isoformat() == '2026-11-25'
+        assert (back.hour, back.minute) == (21, 30)
     asyncio.run(go())
 
 

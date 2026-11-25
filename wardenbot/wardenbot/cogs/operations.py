@@ -197,12 +197,12 @@ class DateChoices(discord.ui.View):
                 await cog.show_preview(interaction, draft, lang)
             button.callback = quick
             self.add_item(button)
-        for label, offset in (('Сегодня', 0), ('Завтра', 1), ('Выбрать день', None), ('Позже', None)):
+        for label, offset in (('Сегодня', 0), ('Завтра', 1), ('Выбрать день', None)):
             button = discord.ui.Button(label=label)
-            async def choose(interaction, day=offset, later=label == 'Позже'):
+            async def choose(interaction, day=offset):
                 if interaction.user.id != draft.organizer_id:
                     await reply(interaction, t('err_no_perm', lang)); return
-                picker = DatePicker(cog, draft, lang, fixed_day=day, page=1 if later else 0)
+                picker = DatePicker(cog, draft, lang, fixed_day=day)
                 await respond_draft(interaction, picker.prompt(), None, picker)
             button.callback = choose
             self.add_item(button)
@@ -276,6 +276,15 @@ class DatePicker(discord.ui.View):
             await interaction.response.send_modal(ExactTimeModal(self))
         exact.callback = exact_time
         self.add_item(exact)
+        page_button = discord.ui.Button(label='Позже' if page == 0 else 'Раньше')
+        async def change_page(interaction):
+            if interaction.user.id != draft.organizer_id:
+                await reply(interaction, t('err_no_perm', lang)); return
+            picker = DatePicker(cog, draft, lang, page=1 if self.page == 0 else 0,
+                                hour=self.hour, minute=self.minute)
+            await respond_draft(interaction, picker.prompt(), None, picker)
+        page_button.callback = change_page
+        self.add_item(page_button)
 
     def prompt(self):
         return f'Начало: {self.day:%d.%m.%Y}, {self.hour:02d}:{self.minute:02d} · {self.draft.tz_name}. Выберите день и время, затем подтвердите.'
