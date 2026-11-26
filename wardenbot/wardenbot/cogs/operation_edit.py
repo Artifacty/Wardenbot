@@ -3,7 +3,7 @@ import discord
 from .. import repo, operation_service as ops
 from ..slots import parse_slots, parse_supply
 from ..opsmeta import OP_TYPES
-from ..timeutil import ParseError, parse_local_datetime, resolve_tz, from_iso, to_iso, parse_duration_hours
+from ..timeutil import ParseError, parse_local_datetime, resolve_tz, from_iso, to_iso, parse_duration_hours, display_tz
 from ..services import reply, utcnow, report_error, evaluate_member
 
 FIELDS = ('title','region','type','start_at','timezone','duration_min','requirements','briefing_public','briefing_closed')
@@ -20,7 +20,7 @@ class Editor(discord.ui.Modal):
                    ('requirements','Требования',op['requirements'],400)]
         elif section=='schedule':
             specs=[('start','Начало: дата и время / завтра 20:30',from_iso(op['start_at']).astimezone(resolve_tz(op['timezone'])[0]).strftime('%Y-%m-%d %H:%M'),40),
-                   ('timezone','Часовой пояс (Europe/Moscow, UTC+3)',op['timezone'],50),
+                   ('timezone','Часовой пояс (МСК, UTC+3)',display_tz(op['timezone']),50),
                    ('duration','Длительность, часов',str(op['duration_min']/60),12)]
         else:
             specs=[('briefing_public','Публичное описание',op['briefing_public'],1500),

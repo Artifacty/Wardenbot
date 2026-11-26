@@ -24,6 +24,7 @@ def test_time_picker_saves_local_date_and_rejects_past(monkeypatch):
         draft = Draft(1, 10, 'defense', 'ru', 'Europe/Moscow', fixed)
         cog = SimpleNamespace(show_preview=AsyncMock())
         picker = DatePicker(cog, draft, 'ru', fixed_day=1, hour=20, minute=30)
+        assert 'МСК' in picker.prompt() and 'Europe/Moscow' not in picker.prompt()
         assert len(picker.children) == 5
         assert picker.day.isoformat() == '2026-11-26'
         await picker.confirm(interaction())

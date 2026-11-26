@@ -14,7 +14,7 @@ from ..i18n import user_language, parse_error_text, t
 from ..layout import ROLE_BY_KEY
 from ..perms import can_screen, can_staff, can_vouch, is_admitted
 from ..services import audit, evaluate_member, reply, safe_dm, set_rank_roles, sync_member_roles, utcnow
-from ..timeutil import ParseError, resolve_tz, to_iso
+from ..timeutil import ParseError, resolve_tz, to_iso, display_tz
 
 log = logging.getLogger(__name__)
 RANK_CHOICES = [app_commands.Choice(name=ROLE_BY_KEY[k].name, value=k) for k in ("recruit", "private", "sergeant")]
@@ -118,7 +118,7 @@ class MembersCog(commands.Cog):
 
     # ------------------------------------------------------------ time zone --
     @timezone.command(name="set", description="Set your time zone · Задать часовой пояс")
-    @app_commands.describe(zone="Europe/Moscow, МСК, UTC+3 …")
+    @app_commands.describe(zone="МСК, UTC+3 …")
     async def tz_set(self, interaction: discord.Interaction, zone: str) -> None:
         lang = await user_language(interaction)
         try:
@@ -129,7 +129,7 @@ class MembersCog(commands.Cog):
         now = utcnow()
         await interaction.response.defer(ephemeral=True)
         await self.bot.db.write(lambda conn: repo.user_update(conn, interaction.user.id, now, tz=name))
-        await reply(interaction, t("tz_set", lang, tz=name))
+        await reply(interaction, t("tz_set", lang, tz=display_tz(name)))
 
     @timezone.command(name="show", description="Show your time zone · Показать часовой пояс")
     async def tz_show(self, interaction: discord.Interaction) -> None:
@@ -137,7 +137,7 @@ class MembersCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         user = await self.bot.db.read(repo.user_get, interaction.user.id)
         name = (user["tz"] if user is not None and user["tz"] else None) or self.bot.config.default_tz
-        await reply(interaction, t("tz_show", lang, tz=name))
+        await reply(interaction, t("tz_show", lang, tz=display_tz(name)))
 
     @app_commands.command(name="help", description="Commands and tips · Команды и подсказки")
     async def help(self, interaction: discord.Interaction) -> None:

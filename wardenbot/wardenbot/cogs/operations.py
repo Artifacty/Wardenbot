@@ -29,7 +29,7 @@ from ..ranks import noshow_block_until
 from ..render import Card, OpView, SlotView, SupplyView, build_card, thread_title
 from ..services import interaction_errors, audit, channel_mention, evaluate_member, get_role, get_text_channel, report_error, reply, utcnow
 from ..slots import SlotSpec, SupplySpec, parse_slots, parse_supply, parse_supply_progress
-from ..timeutil import ParseError, from_iso, to_iso, parse_duration_hours, parse_local_datetime, resolve_tz, tz_from_name
+from ..timeutil import ParseError, from_iso, to_iso, parse_duration_hours, parse_local_datetime, resolve_tz, tz_from_name, display_tz
 
 log = logging.getLogger(__name__)
 DRAFT_TTL = timedelta(minutes=45)
@@ -123,7 +123,7 @@ async def respond_draft(
 
 class BasicsModal(discord.ui.Modal):
     def __init__(self, cog: "OperationsCog", draft: Draft, lang: str) -> None:
-        super().__init__(title=f"Операция · {draft.tz_name}"[:45], timeout=900)
+        super().__init__(title=f"Операция · {display_tz(draft.tz_name)}"[:45], timeout=900)
         self.cog, self.draft, self.lang = cog, draft, lang
         raw = draft.raw1
         self.f_title = discord.ui.TextInput(label=t("op_f_title", lang), default=raw.get("title"), max_length=80)
@@ -143,7 +143,7 @@ class BasicsModal(discord.ui.Modal):
         if d.start_at:
             await self.cog.show_preview(interaction, d, lang)
         else:
-            await respond_draft(interaction, f'Когда начинаем? Часовой пояс: {d.tz_name}.', None,
+            await respond_draft(interaction, f'Когда начинаем? Часовой пояс: {display_tz(d.tz_name)}.', None,
                                 DateChoices(self.cog, d, lang))
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
@@ -287,7 +287,7 @@ class DatePicker(discord.ui.View):
         self.add_item(page_button)
 
     def prompt(self):
-        return f'Начало: {self.day:%d.%m.%Y}, {self.hour:02d}:{self.minute:02d} · {self.draft.tz_name}. Выберите день и время, затем подтвердите.'
+        return f'Начало: {self.day:%d.%m.%Y}, {self.hour:02d}:{self.minute:02d} · {display_tz(self.draft.tz_name)}. Выберите день и время, затем подтвердите.'
 
     def _sync_defaults(self):
         """Discord renders Select defaults from options, not from this view's state."""
@@ -378,7 +378,7 @@ class DraftView(discord.ui.View):
         await interaction.response.send_modal(DetailsModal(self.cog, self.draft, self.lang))
 
     async def change_time(self, interaction: discord.Interaction) -> None:
-        await respond_draft(interaction, f'Когда начинаем? Часовой пояс: {self.draft.tz_name}.', None,
+        await respond_draft(interaction, f'Когда начинаем? Часовой пояс: {display_tz(self.draft.tz_name)}.', None,
                             DateChoices(self.cog, self.draft, self.lang))
 
     async def discard(self, interaction: discord.Interaction) -> None:
@@ -592,7 +592,7 @@ class ManageView(discord.ui.View):
         draft = Draft(op['guild_id'], interaction.user.id, op['type'], op['language'],
                       op['timezone'], utcnow())
         editor = ScheduleEditor(self.cog, self.op_id, op['revision'])
-        await respond_draft(interaction, f'Выберите новое время. Часовой пояс: {draft.tz_name}.',
+        await respond_draft(interaction, f'Выберите новое время. Часовой пояс: {display_tz(draft.tz_name)}.',
                             None, DateChoices(editor, draft, self.lang))
 
     async def edit_briefing(self,interaction):
@@ -919,7 +919,7 @@ class OperationsCog(commands.Cog):
     async def show_preview(self, interaction: discord.Interaction, d: Draft, lang: str) -> None:
         embed = card_embed(build_card(d.preview_view()))
         local = d.start_at.astimezone(tz_from_name(d.tz_name))
-        when = f'{local:%d.%m.%Y %H:%M} · {d.tz_name} (<t:{int(d.start_at.timestamp())}:R>)'
+        when = f'{local:%d.%m.%Y %H:%M} · {display_tz(d.tz_name)} (<t:{int(d.start_at.timestamp())}:R>)'
         await respond_draft(interaction, f'Начало: {when}. Проверьте карточку и опубликуйте.',
                             embed, DraftView(self, d, lang, "ready"))
 

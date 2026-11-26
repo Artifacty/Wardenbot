@@ -6,7 +6,12 @@ import re
 from datetime import UTC, datetime, time, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-__all__ = ["ParseError", "resolve_tz", "tz_from_name", "parse_local_datetime", "parse_duration_hours", "to_iso", "from_iso"]
+__all__ = ["ParseError", "resolve_tz", "tz_from_name", "display_tz", "parse_local_datetime", "parse_duration_hours", "to_iso", "from_iso"]
+
+
+def display_tz(name: str) -> str:
+    """Short user-facing label; keep the canonical name for calculations and storage."""
+    return "МСК" if name.casefold() in {"europe/moscow", "мск", "msk"} else name
 
 
 class ParseError(ValueError):
