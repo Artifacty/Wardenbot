@@ -159,7 +159,8 @@ def test_losing_upload_deletes_extra_card(monkeypatch):
     asyncio.run(go())
 
 
-def test_current_card_can_be_approved_once(monkeypatch):
+@pytest.mark.parametrize('decision, user_status', [('approved', 'admitted'), ('rejected', 'rejected')])
+def test_current_card_keeps_screenshot_and_can_be_decided_once(monkeypatch, decision, user_status):
     async def go():
         db = Database(':memory:')
         bot = WardenBot(Config(token='unused'), db)
@@ -168,16 +169,21 @@ def test_current_card_can_be_approved_once(monkeypatch):
         i = interaction(bot)
         applicant = SimpleNamespace(id=10, created_at=NOW - timedelta(days=30))
         i.guild.get_member = lambda uid: applicant
-        i.message = SimpleNamespace(id=100, edit=AsyncMock())
+        card = SimpleNamespace(id=100, edit=AsyncMock(),
+                               attachments=[SimpleNamespace(filename='screenshot.png')])
+        i.message = card if decision == 'approved' else None
         roles = AsyncMock()
         monkeypatch.setattr(verification, 'sync_member_roles', roles)
         monkeypatch.setattr(verification, 'safe_dm', AsyncMock())
         monkeypatch.setattr(verification, 'audit', AsyncMock())
-        await verification.decide(i, rid, 'approved', '')
-        await verification.decide(i, rid, 'approved', '')
+        await verification.decide(i, rid, decision, 'Причина', card)
+        await verification.decide(i, rid, decision, 'Причина', card)
         roles.assert_awaited_once()
-        assert (await db.read(repo.user_get, 10))['status'] == 'admitted'
-        i.message.edit.assert_awaited_once()
-        assert i.message.edit.call_args.kwargs['attachments'] == []
+        assert (await db.read(repo.user_get, 10))['status'] == user_status
+        card.edit.assert_awaited_once()
+        changes = card.edit.call_args.kwargs
+        assert 'attachments' not in changes  # Discord retains existing files.
+        assert changes['embed'].image.url == 'attachment://screenshot.png'
+        assert changes['view'] is None
         db.close()
     asyncio.run(go())

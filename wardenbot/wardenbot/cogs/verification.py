@@ -288,13 +288,17 @@ async def decide(
         key = {"approved": "ver_approved_dm", "rejected": "ver_rejected_dm", "needs_info": "ver_info_dm"}[status]
         text = t(key, "ru", reason=reason)
         await safe_dm(member, text)
-    # Update the card: drop the buttons and the screenshot.
+    # Keep the screenshot on the review card after the moderator's decision.
     if message is not None:
         decision = {"approved": "Подтверждено", "rejected": "Отклонено", "needs_info": "Нужно уточнение"}[status]
         note = f"{decision} · <@{interaction.user.id}>" + (f"\n{reason}" if reason else "")
         embed = build_review_embed(req, member, status, note)
+        attachments = getattr(message, "attachments", ())
+        if attachments:
+            embed.set_image(url=f"attachment://{attachments[0].filename}")
         try:
-            await message.edit(embed=embed, view=None, attachments=[])
+            # Omitting attachments preserves the files already hosted on this message.
+            await message.edit(embed=embed, view=None)
         except discord.HTTPException:
             log.warning("Could not update review card", exc_info=True)
     await audit(bot, guild, interaction.user, {"approved": "Допуск подтверждён", "rejected": "Допуск отклонён", "needs_info": "Запрошено уточнение"}[status], f"<@{uid}>", reason)
