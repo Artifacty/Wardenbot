@@ -3,9 +3,9 @@ This server is for Warden players. By joining, you agree to these rules.
 
 **1. Access**
 1.1 Use one Discord account per person.
-1.2 Enter your in-game name, optional clan and preferred language. Type the bot’s code in the in-game chat and upload one screenshot showing F1 and the chat with that code. A moderator checks the request. Your application data is used for verification; the screenshot is removed from the review card after the decision.
+1.2 Enter your in-game name and optional clan. Type the bot’s code in the in-game chat and upload one screenshot showing F1 and the chat with that code. A moderator checks the request. Your application data is used for verification; the screenshot stays on the review card accessible to moderators after the decision.
 1.3 When a new war starts, you must confirm your faction again.
-1.4 Do not hand your access to others, share invites, or post screenshots of closed channels. Only the bot creates invites.
+1.4 Members may create invite links and invite other Warden players to the server. Each invited player must complete verification themselves. Do not share your account or post screenshots of closed channels.
 
 **2. Security**
 2.1 Stockpile codes, muster coordinates and operation plans go only in closed channels and operation cards. In open channels, an autofilter deletes six-digit codes.
