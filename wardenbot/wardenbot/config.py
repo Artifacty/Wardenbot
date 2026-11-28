@@ -38,6 +38,8 @@ class Config:
     channel_name_style: str = "full"  # full | ru | en
     log_level: str = "INFO"
     message_content_intent: bool = False  # optional; archive cards do not require message contents
+    war_map_enabled: bool = True
+    war_map_shard: str = "able"
     # Rank rules (starting values from the project plan).
     private_after_days: int = 7
     sergeant_after_ops: int = 10
@@ -78,8 +80,13 @@ def load_config(env: Mapping[str, str] | None = None, env_file: str | Path = ".e
         raise ConfigError("CHANNEL_NAME_STYLE must be one of: full, ru, en")
 
     dev_guild = merged.get("DEV_GUILD_ID", "").strip()
+    shard = merged.get("WAR_MAP_SHARD", "able").strip().lower() or "able"
+    if shard not in {"able", "baker", "charlie"}:
+        raise ConfigError("WAR_MAP_SHARD must be able, baker or charlie")
     return Config(
         token=token,
+        war_map_shard=shard,
+        war_map_enabled=merged.get("WAR_MAP_ENABLED", "true").strip().lower() in {"1", "true", "yes"},
         message_content_intent=merged.get("MESSAGE_CONTENT_INTENT", "false").strip().lower() in {"1", "true", "yes"},
         db_path=merged.get("DB_PATH", "data/wardenbot.db").strip() or "data/wardenbot.db",
         default_tz=merged.get("DEFAULT_TZ", "Europe/Moscow").strip() or "Europe/Moscow",

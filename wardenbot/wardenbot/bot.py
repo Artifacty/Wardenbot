@@ -31,6 +31,7 @@ EXTENSIONS = (
     "wardenbot.cogs.moderation",
     "wardenbot.cogs.clans",
     "wardenbot.cogs.housekeeping",
+    "wardenbot.cogs.war_map",
 )
 
 

@@ -1,0 +1,267 @@
+{
+  "OlavisWakeHex": {
+    "name": "Olavis Wake",
+    "col": 0,
+    "row": 2
+  },
+  "PariPeakHex": {
+    "name": "Pari Peak",
+    "col": 1,
+    "row": 1
+  },
+  "PalantineBermHex": {
+    "name": "Palantine Berm",
+    "col": 1,
+    "row": 2
+  },
+  "OarbreakerHex": {
+    "name": "Oarbreaker Isles",
+    "col": 1,
+    "row": 3
+  },
+  "KuuraStrandHex": {
+    "name": "Kuura Strand",
+    "col": 2,
+    "row": 1
+  },
+  "GutterHex": {
+    "name": "The Gutter",
+    "col": 2,
+    "row": 2
+  },
+  "FishermansRowHex": {
+    "name": "Fishermans Row",
+    "col": 2,
+    "row": 3
+  },
+  "StemaLandingHex": {
+    "name": "Stema Landing",
+    "col": 2,
+    "row": 4
+  },
+  "NevishLineHex": {
+    "name": "Nevish Line",
+    "col": 3,
+    "row": 1
+  },
+  "FarranacCoastHex": {
+    "name": "Farranac Coast",
+    "col": 3,
+    "row": 2
+  },
+  "WestgateHex": {
+    "name": "Westgate",
+    "col": 3,
+    "row": 3
+  },
+  "OriginHex": {
+    "name": "Origin",
+    "col": 3,
+    "row": 4
+  },
+  "CallumsCapeHex": {
+    "name": "Callums Cape",
+    "col": 4,
+    "row": 1
+  },
+  "StonecradleHex": {
+    "name": "Stonecradle",
+    "col": 4,
+    "row": 2
+  },
+  "KingsCageHex": {
+    "name": "Kings Cage",
+    "col": 4,
+    "row": 3
+  },
+  "SableportHex": {
+    "name": "Sableport",
+    "col": 4,
+    "row": 4
+  },
+  "AshFieldsHex": {
+    "name": "Ash Fields",
+    "col": 4,
+    "row": 5
+  },
+  "SpeakingWoodsHex": {
+    "name": "Speaking Woods",
+    "col": 5,
+    "row": 0
+  },
+  "MooringCountyHex": {
+    "name": "The Moors",
+    "col": 5,
+    "row": 1
+  },
+  "LinnMercyHex": {
+    "name": "The Linn of Mercy",
+    "col": 5,
+    "row": 2
+  },
+  "LochMorHex": {
+    "name": "Loch Mór",
+    "col": 5,
+    "row": 3
+  },
+  "HeartlandsHex": {
+    "name": "The Heartlands",
+    "col": 5,
+    "row": 4
+  },
+  "RedRiverHex": {
+    "name": "Red River",
+    "col": 5,
+    "row": 5
+  },
+  "BasinSionnachHex": {
+    "name": "Basin Sionnach",
+    "col": 6,
+    "row": 0
+  },
+  "ReachingTrailHex": {
+    "name": "Reaching Trail",
+    "col": 6,
+    "row": 1
+  },
+  "CallahansPassageHex": {
+    "name": "Callahans Passage",
+    "col": 6,
+    "row": 2
+  },
+  "DeadLandsHex": {
+    "name": "Deadlands",
+    "col": 6,
+    "row": 3
+  },
+  "UmbralWildwoodHex": {
+    "name": "Umbral Wildwood",
+    "col": 6,
+    "row": 4
+  },
+  "GreatMarchHex": {
+    "name": "Great March",
+    "col": 6,
+    "row": 5
+  },
+  "KalokaiHex": {
+    "name": "Kalokai",
+    "col": 6,
+    "row": 6
+  },
+  "HowlCountyHex": {
+    "name": "Howl County",
+    "col": 7,
+    "row": 0
+  },
+  "ViperPitHex": {
+    "name": "Viper Pit",
+    "col": 7,
+    "row": 1
+  },
+  "MarbanHollowHex": {
+    "name": "Marban Hollow",
+    "col": 7,
+    "row": 2
+  },
+  "DrownedValeHex": {
+    "name": "The Drowned Vale",
+    "col": 7,
+    "row": 3
+  },
+  "ShackledChasmHex": {
+    "name": "Shackled Chasm",
+    "col": 7,
+    "row": 4
+  },
+  "AcrithiaHex": {
+    "name": "Acrithia",
+    "col": 7,
+    "row": 5
+  },
+  "ClansheadValleyHex": {
+    "name": "Clanshead Valley",
+    "col": 8,
+    "row": 1
+  },
+  "WeatheredExpanseHex": {
+    "name": "Weathered Expanse",
+    "col": 8,
+    "row": 2
+  },
+  "ClahstraHex": {
+    "name": "The Clahstra",
+    "col": 8,
+    "row": 3
+  },
+  "AllodsBightHex": {
+    "name": "Allods Bight",
+    "col": 8,
+    "row": 4
+  },
+  "TerminusHex": {
+    "name": "Terminus",
+    "col": 8,
+    "row": 5
+  },
+  "MorgensCrossingHex": {
+    "name": "Morgens Crossing",
+    "col": 9,
+    "row": 1
+  },
+  "StlicanShelfHex": {
+    "name": "Stlican Shelf",
+    "col": 9,
+    "row": 2
+  },
+  "EndlessShoreHex": {
+    "name": "Endless Shore",
+    "col": 9,
+    "row": 3
+  },
+  "ReaversPassHex": {
+    "name": "Reavers Pass",
+    "col": 9,
+    "row": 4
+  },
+  "GodcroftsHex": {
+    "name": "Godcrofts",
+    "col": 10,
+    "row": 2
+  },
+  "TempestIslandHex": {
+    "name": "Tempest Island",
+    "col": 10,
+    "row": 3
+  },
+  "WrestaHex": {
+    "name": "Wresta",
+    "col": 10,
+    "row": 4
+  },
+  "OnyxHex": {
+    "name": "Onyx",
+    "col": 10,
+    "row": 5
+  },
+  "LykosIsleHex": {
+    "name": "Lykos Isle",
+    "col": 11,
+    "row": 2
+  },
+  "TheFingersHex": {
+    "name": "The Fingers",
+    "col": 11,
+    "row": 3
+  },
+  "TyrantFoothillsHex": {
+    "name": "Tyrant Foothills",
+    "col": 11,
+    "row": 4
+  },
+  "PipersEnclaveHex": {
+    "name": "Pipers Enclave",
+    "col": 12,
+    "row": 4
+  }
+}

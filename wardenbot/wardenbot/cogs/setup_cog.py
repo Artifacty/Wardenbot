@@ -336,6 +336,9 @@ class SetupCog(commands.Cog):
         community = self.bot.get_cog("CommunityCog")
         if community is not None:
             await community.panels(guild)
+        war_map = self.bot.get_cog("WarMapCog")
+        if war_map is not None:
+            await war_map.publish(guild)
         return notes
 
     # ------------------------------------------------------------ commands --

@@ -73,6 +73,7 @@ def test_read_only_and_bot_forum_rules():
     rules = channel_overwrites(by_key["rules"])
     assert rules["everyone"].send_messages is False
     assert rules["everyone"].add_reactions is False
+    assert channel_overwrites(by_key["brief"])["bot"].pin_messages is True
     screening = channel_overwrites(by_key["screening"])
     assert set(screening) == {"everyone", "bot", *viewer_roles("screening")}
 
@@ -85,22 +86,23 @@ def make_bot():
 def test_all_extensions_load_and_commands_are_valid():
     async def go():
         bot = make_bot()
-        for ext in EXTENSIONS:
-            await bot.load_extension(ext)
-        bot.get_cog("OperationsCog").tick.cancel()
-        bot.get_cog("HousekeepingCog").promotions.cancel()
-        names = set()
-        for cmd in bot.tree.get_commands():
-            d = cmd.to_dict(bot.tree)
-            names.add(cmd.name)
-            assert len(d["description"]) <= 100, d["description"]
-            for opt in d.get("options", []):
-                assert len(opt["description"]) <= 100, (cmd.name, opt["name"])
-                for sub in opt.get("options", []):
-                    assert len(sub["description"]) <= 100, (cmd.name, opt["name"], sub["name"])
-        assert {"setup", "verify", "operation", "priority", "member", "timezone", "help"} <= names
-        for cog in list(bot.cogs):
-            await bot.remove_cog(cog)
+        async with bot:
+            for ext in EXTENSIONS:
+                await bot.load_extension(ext)
+            bot.get_cog("OperationsCog").tick.cancel()
+            bot.get_cog("HousekeepingCog").promotions.cancel()
+            names = set()
+            for cmd in bot.tree.get_commands():
+                d = cmd.to_dict(bot.tree)
+                names.add(cmd.name)
+                assert len(d["description"]) <= 100, d["description"]
+                for opt in d.get("options", []):
+                    assert len(opt["description"]) <= 100, (cmd.name, opt["name"])
+                    for sub in opt.get("options", []):
+                        assert len(sub["description"]) <= 100, (cmd.name, opt["name"], sub["name"])
+            assert {"setup", "verify", "operation", "priority", "member", "timezone", "help", "warmap"} <= names
+            for cog in list(bot.cogs):
+                await bot.remove_cog(cog)
 
     run(go())
 

@@ -105,24 +105,26 @@ def test_native_localization_and_preverification_exception():
         from wardenbot.bot import EXTENSIONS
         from wardenbot.command_locale import CommandTranslator
         bot = WardenBot(Config(token='unused'),Database(':memory:'))
-        for ext in EXTENSIONS:
-            await bot.load_extension(ext)
-        translator = CommandTranslator()
-        menu = await bot.tree.get_command('menu').get_translated_payload(bot.tree,translator)
-        assert not menu['name_localizations']
-        assert bot.tree.get_command('language') is None
-        assert bot.tree.get_command('setup').default_permissions is None
-        def check_names(command):
-            assert not command.get('name_localizations')
-            for child in command.get('options', []):
-                check_names(child)
-        for command in bot.tree.get_commands():
-            check_names(await command.get_translated_payload(bot.tree,translator))
-        verify = await bot.tree.get_command('verify').get_translated_payload(bot.tree,translator)
-        assert not verify['name_localizations']
-        for opt in verify['options']:
-            assert not opt['name_localizations']
-        for name in list(bot.cogs):
-            await bot.remove_cog(name)
-        bot.db.close()
+        async with bot:
+            for ext in EXTENSIONS:
+                await bot.load_extension(ext)
+            translator = CommandTranslator()
+            menu = await bot.tree.get_command('menu').get_translated_payload(bot.tree,translator)
+            assert not menu['name_localizations']
+            assert bot.tree.get_command('language') is None
+            assert bot.tree.get_command('setup').default_permissions is None
+            def check_names(command):
+                assert not command.get('name_localizations')
+                for child in command.get('options', []):
+                    check_names(child)
+            for command in bot.tree.get_commands():
+                check_names(await command.get_translated_payload(bot.tree,translator))
+            verify = await bot.tree.get_command('verify').get_translated_payload(bot.tree,translator)
+            assert not verify['name_localizations']
+            for opt in verify['options']:
+                assert not opt['name_localizations']
+            for name in list(bot.cogs):
+                await bot.remove_cog(name)
+            bot.db.close()
+
     asyncio.run(go())

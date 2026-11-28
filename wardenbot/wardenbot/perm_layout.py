@@ -61,6 +61,8 @@ def channel_overwrites(ch: ChannelDef) -> dict[str, discord.PermissionOverwrite]
         if ch.allies:
             result["ally"] = overwrite_for(ch.mode, "ally")
     result["bot"] = bot_overwrite()
+    if ch.key == "brief":
+        result["bot"].pin_messages = True
     return result
 
 

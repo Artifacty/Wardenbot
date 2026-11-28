@@ -186,7 +186,8 @@ def test_migration_is_idempotent(tmp_path):
     path = str(tmp_path / "x.db")
     connect(path).close()
     c = connect(path)
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 10
+    from wardenbot.db import MIGRATIONS
+    assert c.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
     c.close()
 
 

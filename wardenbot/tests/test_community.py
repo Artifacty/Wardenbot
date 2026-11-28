@@ -344,7 +344,7 @@ def test_upgrade_v7_preserves_users_and_operations(tmp_path, monkeypatch):
         old.close()
         monkeypatch.setattr(storage, 'MIGRATIONS', migrations)
         updated = Database(str(path))
-        assert updated.conn.execute('PRAGMA user_version').fetchone()[0] == 10
+        assert updated.conn.execute('PRAGMA user_version').fetchone()[0] == len(migrations)
         assert (await updated.read(repo.op_get, oid))['briefing_closed'] == 'План'
         assert (await updated.read(repo.user_get, 10))['status'] == 'admitted'
         pid = await updated.write(service.create, 1, 10, 'ticket', 'Вопрос', 'Работает после миграции')

@@ -1,2 +1,4 @@
 discord.py>=2.7.1,<2.8
 tzdata
+Pillow>=11.1,<13
+aiohttp>=3.9,<4

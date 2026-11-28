@@ -251,6 +251,16 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE community_posts ADD COLUMN message_deleted INTEGER NOT NULL DEFAULT 0;
     """,
+    """
+    CREATE TABLE war_map_cache (
+        shard TEXT NOT NULL, scope TEXT NOT NULL, path TEXT NOT NULL,
+        payload TEXT NOT NULL, etag TEXT, expires_at REAL NOT NULL,
+        PRIMARY KEY (shard, scope, path)
+    );
+    CREATE TABLE war_map_snapshots (
+        shard TEXT PRIMARY KEY, payload TEXT NOT NULL
+    );
+    """,
 
 ]
 
