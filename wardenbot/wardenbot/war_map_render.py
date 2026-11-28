@@ -18,10 +18,6 @@ REGIONS = json.loads((ASSETS / 'regions.json').read_text(encoding='utf-8'))
 REGION_INDEX = {name.lower().removesuffix('hex'): value for name, value in REGIONS.items()}
 COLORS = {'WARDENS': '#68acff', 'COLONIALS': '#a5bd70', 'NONE': '#eeeeed'}
 BASES = {27, 45, 46, 47, 56, 57, 58}
-SECTOR_BASES = {45, 46, 47, 56, 57, 58}
-SECTOR_COLORS = {'WARDENS': (78, 153, 217, 116),
-                 'COLONIALS': (128, 196, 92, 124),
-                 'NONE': (182, 188, 190, 65)}
 NAVY = '#111d2b'
 HEX_WIDTH = 4096 / 10  # 13 columns with 3/4-width pitch, including the naval regions.
 HEX_HEIGHT = HEX_WIDTH * math.sqrt(3) / 2
@@ -59,63 +55,6 @@ def region_box(info):
 def point(info, x, y):
     left, top, _, _ = region_box(info)
     return left + x * HEX_WIDTH, top + y * HEX_HEIGHT
-
-
-def hex_vertices(width, height):
-    """Local coordinates of the playable hex, with pointed left/right ends."""
-    return [(0, height/2), (width/4, 0), (3*width/4, 0),
-            (width, height/2), (3*width/4, height), (width/4, height)]
-
-
-def clip_nearest(polygon, site, other):
-    """Clip a polygon to points at least as close to site as to other."""
-    sx, sy = site
-    ox, oy = other
-    dx, dy = ox-sx, oy-sy
-    threshold = (ox*ox + oy*oy - sx*sx - sy*sy) / 2
-    def distance(vertex):
-        return vertex[0]*dx + vertex[1]*dy - threshold
-    result = []
-    if not polygon:
-        return result
-    previous = polygon[-1]
-    previous_distance = distance(previous)
-    for current in polygon:
-        current_distance = distance(current)
-        if (previous_distance <= 0) != (current_distance <= 0):
-            fraction = previous_distance / (previous_distance-current_distance)
-            result.append((previous[0] + fraction*(current[0]-previous[0]),
-                           previous[1] + fraction*(current[1]-previous[1])))
-        if current_distance <= 0:
-            result.append(current)
-        previous, previous_distance = current, current_distance
-    return result
-
-
-def sector_polygons(map_items, width, height):
-    """Approximate territories from public town/relic bases; API has no zone borders."""
-    sites = []
-    for item in map_items:
-        if item.get('iconType') not in SECTOR_BASES:
-            continue
-        position = item['x']*width, item['y']*height
-        if any(math.dist(position, prior[0]) < .01 for prior in sites):
-            continue
-        sites.append((position, item.get('teamId', 'NONE')))
-    if not sites:
-        return []
-    bounds = hex_vertices(width, height)
-    result = []
-    for index, (site, team) in enumerate(sites):
-        polygon = bounds[:]
-        for other_index, (other, _) in enumerate(sites):
-            if index != other_index:
-                polygon = clip_nearest(polygon, site, other)
-                if not polygon:
-                    break
-        if len(polygon) >= 3:
-            result.append((polygon, team))
-    return result
 
 
 def _text(draw, xy, text, size, *, anchor=None, fill='white'):
@@ -159,32 +98,12 @@ def render(snapshot, region=None):
     else:
         base = background().crop((0, round(TOP), 4096, round(TOP+7*HEX_HEIGHT)))
     image.paste(base.resize((width, map_height), Image.Resampling.LANCZOS), (0, header))
-    active = snapshot['regions']
-    # Paint full sector polygons under labels and icons. A separate transparent
-    # layer keeps the terrain visible and prevents alpha accumulating at edges.
-    tint = Image.new('RGBA', image.size)
-    tint_draw = ImageDraw.Draw(tint)
-    for name, region_data in active.items():
-        meta = region_info(name)
-        if detailed and name != region or not detailed and meta is None:
-            continue
-        if detailed:
-            left, top, sector_width, sector_height = 0, header, width, map_height
-        else:
-            left, top, _, _ = region_box(meta)
-            scale = width / 4096
-            left, top = left*scale, top*scale+header
-            sector_width, sector_height = HEX_WIDTH*scale, HEX_HEIGHT*scale
-        for polygon, team in sector_polygons(region_data['dynamic']['mapItems'],
-                                             sector_width, sector_height):
-            points = [(left+x, top+y) for x, y in polygon]
-            tint_draw.polygon(points, fill=SECTOR_COLORS.get(team, SECTOR_COLORS['NONE']))
-    image = Image.alpha_composite(image.convert('RGBA'), tint).convert('RGB')
     draw = ImageDraw.Draw(image)
     title = region_name(region) if detailed else 'КАРТА ВОЙНЫ'
     _text(draw, (24, 12), title, 29)
     checked = datetime.fromtimestamp(snapshot['checked_at'], ZoneInfo('Europe/Moscow'))
     _text(draw, (24, 50), f"{snapshot['shard'].title()} · Война №{snapshot['war']['warNumber']} · Проверено {checked:%d.%m %H:%M} МСК", 17)
+    active = snapshot['regions']
     if not detailed:
         scale = width / 4096
         for name, meta in REGIONS.items():
@@ -192,7 +111,7 @@ def render(snapshot, region=None):
             cx, cy = (left+right)/2, (top+bottom)/2
             pts = [(left,cy),(left+HEX_WIDTH/4,top),(right-HEX_WIDTH/4,top),
                    (right,cy),(right-HEX_WIDTH/4,bottom),(left+HEX_WIDTH/4,bottom)]
-            draw.line([(x*scale, y*scale+header) for x,y in pts+[pts[0]]], fill='#263442', width=2)
+            draw.line([(x*scale, y*scale+header) for x,y in pts+[pts[0]]], fill='#586574', width=1)
     for name, data in active.items():
         meta = region_info(name)
         if detailed and name != region or not detailed and meta is None:
@@ -228,7 +147,7 @@ def render(snapshot, region=None):
         x=24+index*220
         draw.rectangle((x,y,x+16,y+16), fill=COLORS[team])
         _text(draw,(x+25,y-2),label,18)
-    _text(draw,(24,y+32),'Заливка: ближайшая база (границы приблизительные) · метки: контроль объектов',15)
+    _text(draw,(24,y+32),'Контроль объектов · квадрат: база · ромб: победный город · круг: прочие объекты',15)
     note = 'Foxhole War API · Карта: Siege Camp / Kastow / Sentsu / NoUDerp'
     if detailed and not info:
         note = 'Схема координат: фон нового региона ещё не добавлен · Foxhole War API'

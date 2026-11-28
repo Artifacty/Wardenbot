@@ -15,7 +15,7 @@ from wardenbot.bot import WardenBot
 from wardenbot.config import Config
 from wardenbot.db import Database
 from wardenbot.cogs.war_map import WarMapCog, MapView, map_embed
-from wardenbot.war_map_render import render, region_info, region_name, REGIONS, point, sector_polygons
+from wardenbot.war_map_render import render, region_info, region_name, REGIONS, point
 
 
 def snapshot():
@@ -162,27 +162,6 @@ def test_renderer_and_region_menu_cover_all_regions():
         old['checked_at'] -= 1000
         assert 'задерживается' in map_embed('able', old, None, 'test').description
     asyncio.run(go())
-
-
-def test_sector_fill_divides_one_hex_by_base_and_clips_to_border():
-    items = [
-        {'x': .25, 'y': .5, 'teamId': 'WARDENS', 'iconType': 56},
-        {'x': .75, 'y': .5, 'teamId': 'COLONIALS', 'iconType': 45},
-    ]
-    sectors = sector_polygons(items, 100, 100)
-    assert len(sectors) == 2
-    assert all(0 <= x <= 100 and 0 <= y <= 100
-               for polygon, _ in sectors for x, y in polygon)
-    assert max(x for x, _ in sectors[0][0]) == pytest.approx(50)
-    assert min(x for x, _ in sectors[1][0]) == pytest.approx(50)
-    assert sector_polygons([], 100, 100) == []
-    s = snapshot()
-    s['regions']['DeadLandsHex']['dynamic']['mapItems'] = items
-    with Image.open(BytesIO(render(s, 'DeadLandsHex'))) as image:
-        left = image.getpixel((320, 82+554))
-        right = image.getpixel((960, 82+554))
-        assert left[2] > right[2]  # blue wash on the Warden side
-        assert right[1] > left[1]  # green wash on the Colonial side
 
 
 def test_publish_recovers_lost_id_after_restart_and_deleted_message(tmp_path, monkeypatch):

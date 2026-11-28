@@ -55,7 +55,7 @@ def map_embed(shard, snapshot, error, marker, *, region=None):
                  'Идёт война' if war.get('conquestStartTime') else 'Ожидание начала войны')
         embed.description = (f"**{shard.title()} · Война №{war['warNumber']}** · {phase}\n"
                              f'Проверено {checked:%d.%m.%Y %H:%M} МСК · обновление каждые 5 минут.\n'
-                             'Заливка территорий по ближайшей базе; границы приблизительные.')
+                             'Открытые данные: контроль объектов, без позиций игроков и техники.')
         if error or time.time() - snapshot['checked_at'] > data.INTERVAL * 2:
             embed.description += '\n⚠ Обновление задерживается. Показаны последние полученные данные.'
         if not snapshot['regions']:
